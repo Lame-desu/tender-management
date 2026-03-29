@@ -1,0 +1,393 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  PROCUREMENT_OFFICER
+  EVALUATOR
+  BIDDER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+enum BidderType {
+  ORGANIZATION
+  INDIVIDUAL
+}
+
+enum TenderCategory {
+  GOODS
+  WORKS
+  CONSULTING
+}
+
+enum TenderStatus {
+  DRAFT
+  PUBLISHED
+  UNDER_EVALUATION
+  AWARDED
+  CANCELLED
+}
+
+enum BidStatus {
+  SUBMITTED
+  OPENED
+  TECHNICALLY_QUALIFIED
+  TECHNICALLY_DISQUALIFIED
+  EVALUATED
+  SELECTED
+  NOT_SELECTED
+}
+
+enum DocumentCategory {
+  TECHNICAL
+  FINANCIAL
+  BID_SECURITY
+  OTHER
+}
+
+enum EvaluationType {
+  TECHNICAL
+  FINANCIAL
+}
+
+// ─── USER (base for all actors) ───────────────────────────────────────────────
+
+model User {
+  id        Int        @id @default(autoincrement())
+  fullName  String     @map("full_name")
+  email     String     @unique
+  password  String
+  role      Role       @default(BIDDER)
+  status    UserStatus @default(PENDING)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  // Profile relations (one-to-one)
+  bidderProfile  Bidder?             @relation("UserBidder")
+  officerProfile ProcurementOfficer? @relation("UserOfficer")
+
+  // Tender relations
+  createdTenders Tender[] @relation("TenderCreator")
+
+  // Addendum relations
+  issuedAddenda TenderAddendum[] @relation("AddendumIssuer")
+
+  // Clarification relations
+  askedClarifications    Clarification[] @relation("ClarificationAsker")
+  answeredClarifications Clarification[] @relation("ClarificationAnswerer")
+
+  // Bid relations
+  bids Bid[] @relation("BidOwner")
+
+  // Evaluation committee
+  committeeAssignments EvaluationCommitteeAssignment[] @relation("CommitteeMember")
+  assignedCommittees   EvaluationCommitteeAssignment[] @relation("CommitteeAssigner")
+
+  // Evaluations
+  evaluations Evaluation[] @relation("EvaluatorUser")
+
+  // Debriefing
+  debriefingRequests  DebriefingRequest[] @relation("DebriefingRequester")
+  debriefingResponses DebriefingRequest[] @relation("DebriefingResponder")
+
+  // Notifications
+  notifications Notification[]
+
+  // Audit logs
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+// ─── BIDDER PROFILE ───────────────────────────────────────────────────────────
+
+model Bidder {
+  id                 Int        @id @default(autoincrement())
+  bidderType         BidderType @map("bidder_type")
+  organizationName   String?    @map("organization_name")
+  tinNumber          String     @map("tin_number")
+  tradeLicenseNumber String?    @map("trade_license_number")
+  contactPerson      String     @map("contact_person")
+  phoneNumber        String     @map("phone_number")
+  address            String
+
+  userId Int  @unique @map("user_id")
+  user   User @relation("UserBidder", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("bidders")
+}
+
+// ─── PROCUREMENT OFFICER PROFILE ──────────────────────────────────────────────
+
+model ProcurementOfficer {
+  id               Int    @id @default(autoincrement())
+  department       String
+  position         String
+  organizationName String @map("organization_name")
+
+  userId Int  @unique @map("user_id")
+  user   User @relation("UserOfficer", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("procurement_officers")
+}
+
+// ─── TENDER ───────────────────────────────────────────────────────────────────
+
+model Tender {
+  id                    Int            @id @default(autoincrement())
+  title                 String
+  description           String
+  category              TenderCategory
+  eligibilityCriteria   String         @map("eligibility_criteria")
+  requiredDocuments     String[]       @map("required_documents")
+  evaluationCriteria    Json           @map("evaluation_criteria") // [{name: string, weight: number}]
+  minimumTechnicalScore Float          @default(70) @map("minimum_technical_score")
+  technicalWeight       Float          @default(80) @map("technical_weight")
+  financialWeight       Float          @default(20) @map("financial_weight")
+  bidSecurityRequired   Boolean        @default(false) @map("bid_security_required")
+  bidSecurityAmount     Float?         @map("bid_security_amount")
+  publishDate           DateTime?      @map("publish_date")
+  clarificationDeadline DateTime       @map("clarification_deadline")
+  submissionDeadline    DateTime       @map("submission_deadline")
+  status                TenderStatus   @default(DRAFT)
+  createdAt             DateTime       @default(now()) @map("created_at")
+  updatedAt             DateTime       @updatedAt @map("updated_at")
+
+  createdBy   Int  @map("created_by")
+  createdUser User @relation("TenderCreator", fields: [createdBy], references: [id])
+
+  // Relations
+  addenda              TenderAddendum[]
+  clarifications       Clarification[]
+  bids                 Bid[]
+  committeeAssignments EvaluationCommitteeAssignment[]
+  evaluationSummaries  EvaluationSummary[]
+
+  @@index([status])
+  @@index([createdBy])
+  @@index([category])
+  @@map("tenders")
+}
+
+// ─── TENDER ADDENDUM ──────────────────────────────────────────────────────────
+
+model TenderAddendum {
+  id             Int       @id @default(autoincrement())
+  addendumNumber Int       @map("addendum_number")
+  description    String
+  newDeadline    DateTime? @map("new_deadline")
+  issuedDate     DateTime  @default(now()) @map("issued_date")
+
+  tenderId Int    @map("tender_id")
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  issuedBy   Int  @map("issued_by")
+  issuedUser User @relation("AddendumIssuer", fields: [issuedBy], references: [id])
+
+  @@index([tenderId])
+  @@map("tender_addenda")
+}
+
+// ─── CLARIFICATION ────────────────────────────────────────────────────────────
+
+model Clarification {
+  id           Int       @id @default(autoincrement())
+  question     String
+  answer       String?
+  askedDate    DateTime  @default(now()) @map("asked_date")
+  answeredDate DateTime? @map("answered_date")
+
+  tenderId Int    @map("tender_id")
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  askedBy    Int  @map("asked_by")
+  askedUser  User @relation("ClarificationAsker", fields: [askedBy], references: [id])
+
+  answeredBy   Int?  @map("answered_by")
+  answeredUser User? @relation("ClarificationAnswerer", fields: [answeredBy], references: [id])
+
+  @@index([tenderId])
+  @@map("clarifications")
+}
+
+// ─── BID ──────────────────────────────────────────────────────────────────────
+
+model Bid {
+  id                Int       @id @default(autoincrement())
+  technicalProposal String    @map("technical_proposal")
+  bidAmount         Float     @map("bid_amount")
+  bidSecurityInfo   String?   @map("bid_security_info")
+  submissionDate    DateTime  @default(now()) @map("submission_date")
+  status            BidStatus @default(SUBMITTED)
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  tenderId Int    @map("tender_id")
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  bidderId  Int  @map("bidder_id")
+  bidOwner  User @relation("BidOwner", fields: [bidderId], references: [id])
+
+  // Relations
+  documents         BidDocument[]
+  evaluations       Evaluation[]
+  evaluationSummary EvaluationSummary?
+  debriefingRequest DebriefingRequest?
+
+  @@unique([tenderId, bidderId])
+  @@index([tenderId])
+  @@index([bidderId])
+  @@map("bids")
+}
+
+// ─── BID DOCUMENT ─────────────────────────────────────────────────────────────
+
+model BidDocument {
+  id               Int              @id @default(autoincrement())
+  fileName         String           @map("file_name")
+  fileType         String           @map("file_type")
+  filePath         String           @map("file_path")
+  fileSize         Int              @map("file_size")
+  documentCategory DocumentCategory @map("document_category")
+  uploadDate       DateTime         @default(now()) @map("upload_date")
+
+  bidId Int @map("bid_id")
+  bid   Bid @relation(fields: [bidId], references: [id], onDelete: Cascade)
+
+  @@index([bidId])
+  @@map("bid_documents")
+}
+
+// ─── EVALUATION COMMITTEE ASSIGNMENT ──────────────────────────────────────────
+
+model EvaluationCommitteeAssignment {
+  id           Int      @id @default(autoincrement())
+  assignedDate DateTime @default(now()) @map("assigned_date")
+
+  tenderId Int    @map("tender_id")
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  userId Int  @map("user_id")
+  user   User @relation("CommitteeMember", fields: [userId], references: [id])
+
+  assignedBy   Int  @map("assigned_by")
+  assignedUser User @relation("CommitteeAssigner", fields: [assignedBy], references: [id])
+
+  @@unique([tenderId, userId])
+  @@index([tenderId])
+  @@map("evaluation_committee_assignments")
+}
+
+// ─── EVALUATION ───────────────────────────────────────────────────────────────
+
+model Evaluation {
+  id             Int            @id @default(autoincrement())
+  criteriaScores Json           @map("criteria_scores") // [{criteriaName: string, score: number}]
+  totalScore     Float          @map("total_score")
+  remarks        String?
+  evaluationType EvaluationType @map("evaluation_type")
+  evaluationDate DateTime       @default(now()) @map("evaluation_date")
+
+  bidId Int @map("bid_id")
+  bid   Bid @relation(fields: [bidId], references: [id], onDelete: Cascade)
+
+  evaluatorId Int  @map("evaluator_id")
+  evaluator   User @relation("EvaluatorUser", fields: [evaluatorId], references: [id])
+
+  @@unique([bidId, evaluatorId, evaluationType])
+  @@index([bidId])
+  @@index([evaluatorId])
+  @@map("evaluations")
+}
+
+// ─── EVALUATION SUMMARY ───────────────────────────────────────────────────────
+
+model EvaluationSummary {
+  id                     Int     @id @default(autoincrement())
+  avgTechnicalScore      Float   @map("avg_technical_score")
+  avgFinancialScore      Float?  @map("avg_financial_score")
+  combinedScore          Float?  @map("combined_score")
+  rank                   Int?
+  isTechnicallyQualified Boolean @map("is_technically_qualified")
+  isWinner               Boolean @default(false) @map("is_winner")
+
+  bidId Int @unique @map("bid_id")
+  bid   Bid @relation(fields: [bidId], references: [id], onDelete: Cascade)
+
+  tenderId Int    @map("tender_id")
+  tender   Tender @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+
+  @@index([tenderId])
+  @@map("evaluation_summaries")
+}
+
+// ─── DEBRIEFING REQUEST ───────────────────────────────────────────────────────
+
+model DebriefingRequest {
+  id            Int       @id @default(autoincrement())
+  requestDate   DateTime  @default(now()) @map("request_date")
+  response      String?
+  respondedDate DateTime? @map("responded_date")
+
+  bidId Int @unique @map("bid_id")
+  bid   Bid @relation(fields: [bidId], references: [id], onDelete: Cascade)
+
+  bidderId  Int  @map("bidder_id")
+  bidOwner  User @relation("DebriefingRequester", fields: [bidderId], references: [id])
+
+  respondedBy   Int?  @map("responded_by")
+  respondedUser User? @relation("DebriefingResponder", fields: [respondedBy], references: [id])
+
+  @@map("debriefing_requests")
+}
+
+// ─── NOTIFICATION ─────────────────────────────────────────────────────────────
+
+model Notification {
+  id               Int      @id @default(autoincrement())
+  message          String
+  notificationType String   @map("notification_type")
+  isRead           Boolean  @default(false) @map("is_read")
+  entityType       String?  @map("entity_type")
+  entityId         Int?     @map("entity_id")
+  sentDate         DateTime @default(now()) @map("sent_date")
+
+  userId Int  @map("user_id")
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ─── AUDIT LOG ────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  action     String
+  details    String?
+  entityType String?  @map("entity_type")
+  entityId   Int?     @map("entity_id")
+  ipAddress  String?  @map("ip_address")
+  timestamp  DateTime @default(now())
+
+  performedBy   Int  @map("performed_by")
+  performedUser User @relation(fields: [performedBy], references: [id])
+
+  @@index([performedBy])
+  @@index([timestamp])
+  @@index([action])
+  @@map("audit_logs")
+}
