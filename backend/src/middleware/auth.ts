@@ -21,12 +21,12 @@ const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "refresh-secret";
 const ACCESS_EXPIRES = process.env.JWT_ACCESS_EXPIRES_IN || "15m";
 
 export function generateAccessToken(payload: JwtPayload): string {
-  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: ACCESS_EXPIRES });
+  return jwt.sign(payload, ACCESS_SECRET, { expiresIn: ACCESS_EXPIRES as unknown as jwt.SignOptions["expiresIn"] });
 }
 
 export function generateRefreshToken(id: number): string {
   const expiresIn = process.env.JWT_REFRESH_EXPIRES_IN || "7d";
-  return jwt.sign({ id }, REFRESH_SECRET, { expiresIn });
+  return jwt.sign({ id }, REFRESH_SECRET, { expiresIn: expiresIn as unknown as jwt.SignOptions["expiresIn"] });
 }
 
 export function setTokenCookies(res: Response, accessToken: string, refreshToken: string) {

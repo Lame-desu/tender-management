@@ -67,7 +67,8 @@ export async function create(req: Request, res: Response, next: NextFunction) {
     const parsed = tenderSchema.safeParse(req.body);
     if (!parsed.success) throw new ApiError(400, parsed.error.errors[0]?.message || "Validation failed");
 
-    const tender = await tenderService.createTender(parsed.data, req.user!.id);
+    const data = { ...parsed.data, bidSecurityAmount: parsed.data.bidSecurityAmount ?? undefined };
+    const tender = await tenderService.createTender(data, req.user!.id);
     await audit(req, "Created tender", tender.id);
 
     return ApiResponse.created(res, "Tender created", { tender });
@@ -113,7 +114,8 @@ export async function update(req: Request, res: Response, next: NextFunction) {
     const parsed = tenderSchema.safeParse(req.body);
     if (!parsed.success) throw new ApiError(400, parsed.error.errors[0]?.message || "Validation failed");
 
-    const tender = await tenderService.updateTender(id, parsed.data, req.user!.id);
+    const updateData = { ...parsed.data, bidSecurityAmount: parsed.data.bidSecurityAmount ?? undefined };
+    const tender = await tenderService.updateTender(id, updateData, req.user!.id);
     await audit(req, "Updated tender", id);
 
     return ApiResponse.success(res, "Tender updated", { tender });
