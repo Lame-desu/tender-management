@@ -246,7 +246,7 @@ export default function EvaluatePage() {
                           <FileText className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm">{doc.fileName}</span>
                         </div>
-                        <a href={`http://localhost:5000/api/files/${doc.id}`} target="_blank" rel="noopener noreferrer">
+                        <a href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/files/${doc.id}`} target="_blank" rel="noopener noreferrer">
                           <Button variant="ghost" size="icon" className="h-7 w-7"><Download className="h-3.5 w-3.5" /></Button>
                         </a>
                       </div>

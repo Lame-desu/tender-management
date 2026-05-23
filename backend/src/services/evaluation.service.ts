@@ -659,41 +659,56 @@ export async function getTenderResults(tenderId: number, userId: number, userRol
   if (userRole === "BIDDER") {
     if (tender.status !== "AWARDED") throw new ApiError(400, "Results not available yet");
 
+    // Get the current user's bid ID
     const myBid = await prisma.bid.findFirst({
       where: { tenderId, bidderId: userId },
-      include: { evaluationSummary: true },
+      select: { id: true },
     });
 
-    const winnerBid = await prisma.bid.findFirst({
-      where: { tenderId, status: "SELECTED" },
+    // Full ranked list of all bids — public transparency
+    const allBids = await prisma.bid.findMany({
+      where: { tenderId, status: { in: ["SELECTED", "NOT_SELECTED", "EVALUATED", "TECHNICALLY_QUALIFIED", "TECHNICALLY_DISQUALIFIED"] } },
       include: {
         bidOwner: { select: { fullName: true, bidderProfile: { select: { organizationName: true } } } },
         evaluationSummary: true,
       },
+      orderBy: { bidAmount: "asc" },
     });
 
     const totalBids = await prisma.bid.count({ where: { tenderId } });
 
+    // Sort by rank (ranked bids first, then unranked)
+    const ranked = allBids
+      .map((b) => ({
+        bidId: b.id,
+        bidderName: b.bidOwner.bidderProfile?.organizationName || b.bidOwner.fullName,
+        bidAmount: b.bidAmount,
+        status: b.status,
+        avgTechnicalScore: b.evaluationSummary?.avgTechnicalScore ?? null,
+        avgFinancialScore: b.evaluationSummary?.avgFinancialScore ?? null,
+        combinedScore: b.evaluationSummary?.combinedScore ?? null,
+        rank: b.evaluationSummary?.rank ?? null,
+        isWinner: b.evaluationSummary?.isWinner ?? false,
+        isMine: b.id === myBid?.id,
+      }))
+      .sort((a, b) => {
+        if (a.rank != null && b.rank != null) return a.rank - b.rank;
+        if (a.rank != null) return -1;
+        if (b.rank != null) return 1;
+        return 0;
+      });
+
     return {
       tender: {
         title: tender.title,
+        status: tender.status,
         evaluationCriteria: tender.evaluationCriteria,
         technicalWeight: tender.technicalWeight,
         financialWeight: tender.financialWeight,
+        minimumTechnicalScore: tender.minimumTechnicalScore,
       },
-      winner: winnerBid ? {
-        bidderName: winnerBid.bidOwner.bidderProfile?.organizationName || winnerBid.bidOwner.fullName,
-        bidAmount: winnerBid.bidAmount,
-      } : null,
-      myBid: myBid ? {
-        bidId: myBid.id,
-        status: myBid.status,
-        bidAmount: myBid.bidAmount,
-        avgTechnicalScore: myBid.evaluationSummary?.avgTechnicalScore ?? null,
-        avgFinancialScore: myBid.evaluationSummary?.avgFinancialScore ?? null,
-        combinedScore: myBid.evaluationSummary?.combinedScore ?? null,
-        rank: myBid.evaluationSummary?.rank ?? null,
-      } : null,
+      bids: ranked,
+      myBidId: myBid?.id ?? null,
       totalBids,
     };
   }

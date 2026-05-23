@@ -404,7 +404,7 @@ function BidDetailPanel({ bidId }: { bidId: number }) {
             {bid.documents?.map((doc) => (
               <div key={doc.id} className="flex items-center justify-between p-2 border rounded-md">
                 <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-muted-foreground" /><span className="text-sm">{doc.fileName}</span><Badge variant="outline" className="text-xs">{doc.documentCategory}</Badge></div>
-                <a href={`http://localhost:5000/api/files/${doc.id}`} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="icon" className="h-7 w-7"><Download className="h-3.5 w-3.5" /></Button></a>
+                <a href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/files/${doc.id}`} target="_blank" rel="noopener noreferrer"><Button variant="ghost" size="icon" className="h-7 w-7"><Download className="h-3.5 w-3.5" /></Button></a>
               </div>
             ))}
           </div>

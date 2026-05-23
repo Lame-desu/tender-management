@@ -351,20 +351,53 @@ export default function BidderTenderDetailPage() {
   );
 }
 
+type BidResult = {
+  bidId: number;
+  bidderName: string;
+  bidAmount: number;
+  status: string;
+  avgTechnicalScore: number | null;
+  avgFinancialScore: number | null;
+  combinedScore: number | null;
+  rank: number | null;
+  isWinner: boolean;
+  isMine: boolean;
+};
+
+type ResultsData = {
+  tender: {
+    title: string;
+    status: string;
+    technicalWeight: number;
+    financialWeight: number;
+    minimumTechnicalScore: number;
+  };
+  bids: BidResult[];
+  myBidId: number | null;
+  totalBids: number;
+};
+
+const rankBadge = (rank: number | null) => {
+  if (rank === 1) return "🥇";
+  if (rank === 2) return "🥈";
+  if (rank === 3) return "🥉";
+  return rank ? `#${rank}` : "—";
+};
+
+const bidResultColors: Record<string, string> = {
+  SELECTED: "bg-green-100 text-green-800",
+  NOT_SELECTED: "bg-gray-100 text-gray-600",
+  EVALUATED: "bg-amber-100 text-amber-700",
+  TECHNICALLY_QUALIFIED: "bg-blue-100 text-blue-700",
+  TECHNICALLY_DISQUALIFIED: "bg-red-100 text-red-700",
+};
+
 function ResultsTab({ tenderId }: { tenderId: number }) {
   const { data, isLoading } = useQuery({
     queryKey: ["tender-results", tenderId],
     queryFn: async () => {
       try {
-        return (await api.get(`/tenders/${tenderId}/results`)).data.data as {
-          winner: { bidderName: string; bidAmount: number } | null;
-          myBid: {
-            bidId: number; status: string; bidAmount: number;
-            avgTechnicalScore: number | null; avgFinancialScore: number | null;
-            combinedScore: number | null; rank: number | null;
-          } | null;
-          totalBids: number;
-        };
+        return (await api.get(`/tenders/${tenderId}/results`)).data.data as ResultsData;
       } catch {
         return null;
       }
@@ -374,59 +407,245 @@ function ResultsTab({ tenderId }: { tenderId: number }) {
   if (isLoading) return <Card><CardContent className="py-8 text-center"><Loader2 className="h-6 w-6 animate-spin mx-auto" /></CardContent></Card>;
   if (!data) return <Card><CardContent className="py-8 text-center text-muted-foreground">Results not available yet.</CardContent></Card>;
 
+  const winner = data.bids.find((b) => b.isWinner);
+  const myBid = data.bids.find((b) => b.isMine);
+  const rankedBids = data.bids.filter((b) => b.rank != null);
+  const disqualifiedBids = data.bids.filter((b) => b.status === "TECHNICALLY_DISQUALIFIED");
+
   return (
-    <div className="space-y-4">
-      {/* Winner Info */}
-      {data.winner && (
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <Trophy className="h-6 w-6 text-green-600 flex-shrink-0" />
-              <div>
-                <p className="font-semibold">Winner: {data.winner.bidderName}</p>
-                <p className="text-sm text-muted-foreground">Winning bid: ETB {data.winner.bidAmount.toLocaleString()} &middot; {data.totalBids} total bids</p>
+    <div className="space-y-5">
+      {/* Winner Announcement Banner */}
+      {winner && (
+        <Card className="border-green-200 bg-gradient-to-r from-green-50 to-emerald-50 overflow-hidden relative">
+          <div className="absolute top-0 right-0 w-32 h-32 opacity-[0.07]">
+            <Trophy className="w-full h-full text-green-600" />
+          </div>
+          <CardContent className="pt-6 pb-5">
+            <div className="flex items-start gap-4">
+              <div className="flex-shrink-0 w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
+                <Trophy className="h-6 w-6 text-green-600" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">Tender Awarded</p>
+                <p className="text-lg font-bold text-green-900">{winner.bidderName}</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-green-700">
+                  <span>Bid Amount: <strong>ETB {winner.bidAmount.toLocaleString()}</strong></span>
+                  {winner.combinedScore != null && <span>Combined Score: <strong>{winner.combinedScore.toFixed(1)}</strong></span>}
+                  <span>Total Participants: <strong>{data.totalBids}</strong></span>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Own Scores */}
-      {data.myBid && (
+      {/* Your Position Card */}
+      {myBid && (
+        <Card className={myBid.isWinner ? "border-green-300 bg-green-50/50" : "border-blue-200 bg-blue-50/30"}>
+          <CardContent className="pt-5 pb-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold ${myBid.isWinner ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}>
+                  {myBid.rank ? `#${myBid.rank}` : "—"}
+                </div>
+                <div>
+                  <p className="font-semibold text-sm">Your Bid Position</p>
+                  <p className="text-xs text-muted-foreground">{myBid.bidderName}</p>
+                </div>
+              </div>
+              <Badge variant="outline" className={bidResultColors[myBid.status] || "bg-gray-100"}>
+                {myBid.status.replace(/_/g, " ")}
+              </Badge>
+            </div>
+            {myBid.isWinner && (
+              <div className="bg-green-100 border border-green-200 rounded-lg p-3 mb-4 flex items-center gap-2">
+                <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                <p className="font-semibold text-green-800 text-sm">Congratulations! Your bid has been selected as the winner!</p>
+              </div>
+            )}
+            {myBid.status === "NOT_SELECTED" && (
+              <div className="bg-gray-100 border border-gray-200 rounded-lg p-3 mb-4 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-gray-500 flex-shrink-0" />
+                <p className="text-sm text-gray-700">Your bid was not selected. You may <Link href="/bidder/my-bids" className="text-primary font-medium hover:underline">request a debriefing</Link> for more details.</p>
+              </div>
+            )}
+            {myBid.status === "TECHNICALLY_DISQUALIFIED" && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0" />
+                <p className="text-sm text-red-700">Your bid did not meet the minimum technical score requirement ({data.tender.minimumTechnicalScore} points). You may <Link href="/bidder/my-bids" className="text-primary font-medium hover:underline">request a debriefing</Link>.</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-white rounded-lg border p-3 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Bid Amount</p>
+                <p className="font-bold text-sm">ETB {myBid.bidAmount.toLocaleString()}</p>
+              </div>
+              <div className="bg-white rounded-lg border p-3 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Technical ({data.tender.technicalWeight}%)</p>
+                <p className="font-bold text-sm">{myBid.avgTechnicalScore != null ? myBid.avgTechnicalScore.toFixed(1) : "—"}</p>
+              </div>
+              <div className="bg-white rounded-lg border p-3 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Financial ({data.tender.financialWeight}%)</p>
+                <p className="font-bold text-sm">{myBid.avgFinancialScore != null ? myBid.avgFinancialScore.toFixed(1) : "—"}</p>
+              </div>
+              <div className="bg-white rounded-lg border p-3 text-center">
+                <p className="text-xs text-muted-foreground mb-1">Combined Score</p>
+                <p className="font-bold text-sm">{myBid.combinedScore != null ? myBid.combinedScore.toFixed(1) : "—"}</p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!myBid && data.myBidId === null && (
+        <Card className="border-dashed">
+          <CardContent className="py-6 text-center text-muted-foreground">
+            <p className="text-sm">You did not submit a bid for this tender.</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Evaluation Summary */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base flex items-center gap-2">
+              <BarChart3 className="h-4 w-4" />
+              Evaluation Leaderboard
+            </CardTitle>
+            <span className="text-xs text-muted-foreground">
+              Scoring: Technical {data.tender.technicalWeight}% + Financial {data.tender.financialWeight}%
+            </span>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {rankedBids.length > 0 ? (
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/50 border-b">
+                    <th className="text-left p-3 font-medium w-16">Rank</th>
+                    <th className="text-left p-3 font-medium">Bidder</th>
+                    <th className="text-right p-3 font-medium">Bid Amount</th>
+                    <th className="text-center p-3 font-medium">Technical</th>
+                    <th className="text-center p-3 font-medium">Financial</th>
+                    <th className="text-center p-3 font-medium">Combined</th>
+                    <th className="text-center p-3 font-medium w-28">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rankedBids.map((bid, idx) => (
+                    <tr
+                      key={bid.bidId}
+                      className={`border-b last:border-b-0 transition-colors ${
+                        bid.isMine
+                          ? "bg-blue-50 hover:bg-blue-100/80 font-medium"
+                          : bid.isWinner
+                          ? "bg-green-50/50 hover:bg-green-50"
+                          : idx % 2 === 0
+                          ? "bg-white hover:bg-muted/30"
+                          : "bg-muted/10 hover:bg-muted/30"
+                      }`}
+                    >
+                      <td className="p-3">
+                        <span className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold ${
+                          bid.rank === 1 ? "bg-yellow-100 text-yellow-800" :
+                          bid.rank === 2 ? "bg-gray-100 text-gray-700" :
+                          bid.rank === 3 ? "bg-orange-100 text-orange-700" :
+                          "bg-muted text-muted-foreground"
+                        }`}>
+                          {rankBadge(bid.rank)}
+                        </span>
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <span>{bid.bidderName}</span>
+                          {bid.isMine && (
+                            <Badge variant="outline" className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0">YOU</Badge>
+                          )}
+                          {bid.isWinner && (
+                            <Trophy className="h-3.5 w-3.5 text-green-600 flex-shrink-0" />
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 text-right tabular-nums">ETB {bid.bidAmount.toLocaleString()}</td>
+                      <td className="p-3 text-center tabular-nums">{bid.avgTechnicalScore?.toFixed(1) ?? "—"}</td>
+                      <td className="p-3 text-center tabular-nums">{bid.avgFinancialScore?.toFixed(1) ?? "—"}</td>
+                      <td className="p-3 text-center font-semibold tabular-nums">{bid.combinedScore?.toFixed(1) ?? "—"}</td>
+                      <td className="p-3 text-center">
+                        <Badge variant="outline" className={`text-[10px] ${bidResultColors[bid.status] || "bg-gray-100"}`}>
+                          {bid.status === "SELECTED" ? "WINNER" : bid.status === "NOT_SELECTED" ? "NOT SELECTED" : bid.status.replace(/_/g, " ")}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-4">No ranked bids available.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Disqualified Bids */}
+      {disqualifiedBids.length > 0 && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Your Bid Results</CardTitle></CardHeader>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base text-muted-foreground flex items-center gap-2">
+              <AlertCircle className="h-4 w-4" />
+              Technically Disqualified ({disqualifiedBids.length})
+            </CardTitle>
+          </CardHeader>
           <CardContent>
-            {data.myBid.status === "SELECTED" && (
-              <div className="bg-green-50 border border-green-200 rounded-md p-3 mb-4">
-                <p className="font-semibold text-green-800">Your bid has been selected!</p>
-              </div>
-            )}
-            {data.myBid.status === "NOT_SELECTED" && (
-              <div className="bg-gray-50 border border-gray-200 rounded-md p-3 mb-4">
-                <p className="text-sm text-gray-700">Your bid was not selected. You may request a debriefing from the My Bids page.</p>
-              </div>
-            )}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
-              {data.myBid.avgTechnicalScore != null && (
-                <div><span className="text-muted-foreground block text-xs">Technical Score</span><strong>{data.myBid.avgTechnicalScore.toFixed(1)}</strong></div>
-              )}
-              {data.myBid.avgFinancialScore != null && (
-                <div><span className="text-muted-foreground block text-xs">Financial Score</span><strong>{data.myBid.avgFinancialScore.toFixed(1)}</strong></div>
-              )}
-              {data.myBid.combinedScore != null && (
-                <div><span className="text-muted-foreground block text-xs">Combined Score</span><strong>{data.myBid.combinedScore.toFixed(1)}</strong></div>
-              )}
-              {data.myBid.rank != null && (
-                <div><span className="text-muted-foreground block text-xs">Rank</span><strong>#{data.myBid.rank}</strong></div>
-              )}
+            <p className="text-xs text-muted-foreground mb-3">
+              These bids scored below the minimum technical requirement ({data.tender.minimumTechnicalScore} points) and were not considered for financial evaluation.
+            </p>
+            <div className="border rounded-lg overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-red-50/50 border-b">
+                    <th className="text-left p-3 font-medium">Bidder</th>
+                    <th className="text-center p-3 font-medium">Technical Score</th>
+                    <th className="text-center p-3 font-medium w-28">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {disqualifiedBids.map((bid) => (
+                    <tr
+                      key={bid.bidId}
+                      className={`border-b last:border-b-0 ${bid.isMine ? "bg-red-50/50 font-medium" : ""}`}
+                    >
+                      <td className="p-3">
+                        <div className="flex items-center gap-2">
+                          <span>{bid.bidderName}</span>
+                          {bid.isMine && (
+                            <Badge variant="outline" className="bg-blue-100 text-blue-700 text-[10px] px-1.5 py-0">YOU</Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 text-center tabular-nums text-red-600 font-medium">{bid.avgTechnicalScore?.toFixed(1) ?? "—"}</td>
+                      <td className="p-3 text-center">
+                        <Badge variant="outline" className="bg-red-100 text-red-700 text-[10px]">DISQUALIFIED</Badge>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {!data.myBid && (
-        <Card><CardContent className="py-8 text-center text-muted-foreground">You did not submit a bid for this tender.</CardContent></Card>
-      )}
+      {/* Transparency Note */}
+      <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/40 border border-dashed">
+        <Shield className="h-4 w-4 text-muted-foreground mt-0.5 flex-shrink-0" />
+        <p className="text-xs text-muted-foreground">
+          Evaluation results are published in accordance with public procurement transparency standards. All participating bidders
+          can view the complete evaluation results. For detailed feedback on your bid, you may request a debriefing from the{" "}
+          <Link href="/bidder/my-bids" className="text-primary hover:underline">My Bids</Link> page.
+        </p>
+      </div>
     </div>
   );
 }

@@ -199,7 +199,7 @@ export default function MyBidsPage() {
                             <span className="text-sm truncate">{doc.fileName}</span>
                             <Badge variant="outline" className="text-xs">{doc.documentCategory}</Badge>
                           </div>
-                          <a href={`http://localhost:5000/api/files/${doc.id}`} target="_blank" rel="noopener noreferrer">
+                          <a href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/files/${doc.id}`} target="_blank" rel="noopener noreferrer">
                             <Button variant="ghost" size="icon" className="h-7 w-7"><Download className="h-3.5 w-3.5" /></Button>
                           </a>
                         </div>
