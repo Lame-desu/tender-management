@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
-  Plus, Search, MoreHorizontal, Eye, UserCheck, UserX, Shield, Loader2, Trash2,
+  Plus, Search, MoreHorizontal, Eye, UserCheck, UserX, Shield, Loader2, Trash2, Send,
 } from "lucide-react";
 import api from "@/lib/api";
 import { User } from "@/types";
@@ -39,6 +39,11 @@ const statusBadge: Record<string, string> = {
   ACTIVE: "bg-green-100 text-green-700 border-green-200",
   INACTIVE: "bg-red-100 text-red-700 border-red-200",
   PENDING: "bg-amber-100 text-amber-700 border-amber-200",
+  PENDING_VERIFICATION: "bg-blue-100 text-blue-700 border-blue-200",
+  INVITED: "bg-purple-100 text-purple-700 border-purple-200",
+};
+const statusLabel: Record<string, string> = {
+  ACTIVE: "Active", INACTIVE: "Inactive", PENDING: "Pending", PENDING_VERIFICATION: "Unverified", INVITED: "Invited",
 };
 
 type ApiErr = { response?: { data?: { message?: string } } };
@@ -84,6 +89,12 @@ export default function UsersPage() {
     onError: (e: ApiErr) => toast.error(e.response?.data?.message || "Failed to delete user"),
   });
 
+  const resendMut = useMutation({
+    mutationFn: async (id: number) => { await api.post(`/users/${id}/resend-invitation`); },
+    onSuccess: () => { toast.success("Invitation email resent"); },
+    onError: (e: ApiErr) => toast.error(e.response?.data?.message || "Failed to resend invitation"),
+  });
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -114,6 +125,8 @@ export default function UsersPage() {
             <SelectItem value="ACTIVE">Active</SelectItem>
             <SelectItem value="INACTIVE">Inactive</SelectItem>
             <SelectItem value="PENDING">Pending</SelectItem>
+            <SelectItem value="PENDING_VERIFICATION">Unverified</SelectItem>
+            <SelectItem value="INVITED">Invited</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -141,15 +154,16 @@ export default function UsersPage() {
                 <TableCell className="font-medium">{u.fullName}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
                 <TableCell><Badge variant="outline" className={roleBadge[u.role]}>{roleLabel[u.role]}</Badge></TableCell>
-                <TableCell><Badge variant="outline" className={statusBadge[u.status]}>{u.status}</Badge></TableCell>
+                <TableCell><Badge variant="outline" className={statusBadge[u.status]}>{statusLabel[u.status] || u.status}</Badge></TableCell>
                 <TableCell className="text-muted-foreground">{format(new Date(u.createdAt), "MMM d, yyyy")}</TableCell>
                 <TableCell>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => setDetailUser(u)}><Eye className="mr-2 h-4 w-4" />View Details</DropdownMenuItem>
-                      {u.status !== "ACTIVE" && <DropdownMenuItem onClick={() => setConfirmAction({ user: u, action: "ACTIVE" })}><UserCheck className="mr-2 h-4 w-4" />Activate</DropdownMenuItem>}
+                      {u.status !== "ACTIVE" && u.status !== "INVITED" && u.status !== "PENDING_VERIFICATION" && <DropdownMenuItem onClick={() => setConfirmAction({ user: u, action: "ACTIVE" })}><UserCheck className="mr-2 h-4 w-4" />Activate</DropdownMenuItem>}
                       {u.status === "ACTIVE" && <DropdownMenuItem onClick={() => setConfirmAction({ user: u, action: "INACTIVE" })}><UserX className="mr-2 h-4 w-4" />Deactivate</DropdownMenuItem>}
+                      {u.status === "INVITED" && <DropdownMenuItem onClick={() => resendMut.mutate(u.id)} disabled={resendMut.isPending}><Send className="mr-2 h-4 w-4" />Resend Invitation</DropdownMenuItem>}
                       <DropdownMenuItem onClick={() => setRoleChangeUser(u)}><Shield className="mr-2 h-4 w-4" />Change Role</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => setDeleteUser(u)} className="text-red-600 focus:text-red-600"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
                     </DropdownMenuContent>
@@ -243,29 +257,28 @@ function ChangeRoleDialog({ user, onClose, onConfirm, isLoading }: { user: User;
 
 function CreateUserDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [sub, setSub] = useState(false);
-  const [f, setF] = useState({ fullName: "", email: "", password: "", role: "", department: "", position: "", organizationName: "" });
+  const [f, setF] = useState({ fullName: "", email: "", role: "", department: "", position: "", organizationName: "" });
   const isOfficer = f.role === "PROCUREMENT_OFFICER";
-  const canSubmit = f.fullName && f.email && f.password && f.role && (!isOfficer || (f.department && f.position));
+  const canSubmit = f.fullName && f.email && f.role && (!isOfficer || (f.department && f.position));
   const submit = async () => {
     setSub(true);
-    try { await api.post("/users", f); toast.success("User created"); setF({ fullName: "", email: "", password: "", role: "", department: "", position: "", organizationName: "" }); onCreated(); }
+    try { await api.post("/users", f); toast.success("Invitation sent successfully"); setF({ fullName: "", email: "", role: "", department: "", position: "", organizationName: "" }); onCreated(); }
     catch (e: unknown) { toast.error((e as ApiErr).response?.data?.message || "Failed"); }
     finally { setSub(false); }
   };
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent><DialogHeader><DialogTitle>Create Internal User</DialogTitle><DialogDescription>Create a new admin, officer, or evaluator account.</DialogDescription></DialogHeader>
+      <DialogContent><DialogHeader><DialogTitle>Invite User</DialogTitle><DialogDescription>Enter the user&apos;s details. An invitation email will be sent for them to set up their password.</DialogDescription></DialogHeader>
         <form autoComplete="off" className="space-y-4" onSubmit={(e) => e.preventDefault()}>
           {/* Hidden decoy fields to absorb browser autofill */}
           <input type="text" name="fake_user" autoComplete="username" style={{ display: 'none' }} tabIndex={-1} />
-          <input type="password" name="fake_pass" autoComplete="current-password" style={{ display: 'none' }} tabIndex={-1} />
           <div className="space-y-2"><Label>Full Name *</Label><Input value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} autoComplete="nope" /></div>
           <div className="space-y-2"><Label>Email *</Label><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} autoComplete="nope" /></div>
-          <div className="space-y-2"><Label>Password *</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="one-time-code" /></div>
           <div className="space-y-2"><Label>Role *</Label><Select value={f.role} onValueChange={(v) => setF({ ...f, role: v })}><SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger><SelectContent><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="PROCUREMENT_OFFICER">Procurement Officer</SelectItem><SelectItem value="EVALUATOR">Evaluator</SelectItem></SelectContent></Select></div>
           {isOfficer && (<><div className="space-y-2"><Label>Department *</Label><Input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} /></div><div className="space-y-2"><Label>Position *</Label><Input value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></div><div className="space-y-2"><Label>Organization</Label><Input value={f.organizationName} onChange={(e) => setF({ ...f, organizationName: e.target.value })} /></div></>)}
+          <div className="rounded-lg border border-blue-200 bg-blue-50/50 p-3"><p className="text-sm text-blue-700 flex items-center gap-2"><Send className="h-4 w-4 flex-shrink-0" />An invitation email will be sent to set up their password.</p></div>
         </form>
-        <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={submit} disabled={sub || !canSubmit}>{sub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create User</Button></DialogFooter>
+        <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={submit} disabled={sub || !canSubmit}>{sub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Send Invitation</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

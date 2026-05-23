@@ -42,11 +42,6 @@ export async function getUser(req: Request, res: Response, next: NextFunction) {
 const createUserSchema = z
   .object({
     email: z.string().email("Invalid email"),
-    password: z
-      .string()
-      .min(8, "Password must be at least 8 characters")
-      .regex(/[A-Z]/, "Must contain at least one uppercase letter")
-      .regex(/[0-9]/, "Must contain at least one number"),
     fullName: z.string().min(2, "Full name is required"),
     role: z.enum(["ADMIN", "PROCUREMENT_OFFICER", "EVALUATOR"]),
     department: z.string().optional(),
@@ -70,11 +65,15 @@ export async function createUser(req: Request, res: Response, next: NextFunction
       throw new ApiError(400, parsed.error.errors[0]?.message || "Validation failed");
     }
 
-    const user = await userService.createInternalUser(parsed.data);
+    // Fetch admin name for the invitation email
+    const admin = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { fullName: true } });
+    const adminName = admin?.fullName || "Administrator";
+
+    const user = await userService.createInternalUser(parsed.data, adminName);
 
     await prisma.auditLog.create({
       data: {
-        action: "Created user account",
+        action: "Created user account (invitation sent)",
         entityType: "User",
         entityId: user.id,
         performedBy: req.user!.id,
@@ -82,7 +81,7 @@ export async function createUser(req: Request, res: Response, next: NextFunction
       },
     });
 
-    return ApiResponse.created(res, "User created successfully", { user });
+    return ApiResponse.created(res, "User created and invitation sent", { user });
   } catch (err) {
     next(err);
   }
@@ -194,6 +193,34 @@ export async function getStats(req: Request, res: Response, next: NextFunction) 
   try {
     const stats = await userService.getAdminStats();
     return ApiResponse.success(res, "Stats retrieved", stats);
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── RESEND INVITATION ────────────────────────────────────────────────────────
+
+export async function resendInvitation(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) throw new ApiError(400, "Invalid user ID");
+
+    const admin = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { fullName: true } });
+    const adminName = admin?.fullName || "Administrator";
+
+    await userService.resendInvitation(id, adminName);
+
+    await prisma.auditLog.create({
+      data: {
+        action: "Resent invitation email",
+        entityType: "User",
+        entityId: id,
+        performedBy: req.user!.id,
+        ipAddress: req.ip || req.socket.remoteAddress || undefined,
+      },
+    });
+
+    return ApiResponse.success(res, "Invitation email has been resent");
   } catch (err) {
     next(err);
   }

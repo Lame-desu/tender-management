@@ -6,7 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Building2, UserRound, Loader2, CheckCircle2 } from "lucide-react";
+import { Building2, UserRound, Loader2, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,11 +129,12 @@ export default function RegisterPage() {
     return (
       <Card className="w-full max-w-md mx-4">
         <CardContent className="pt-8 pb-6 text-center space-y-4">
-          <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto" />
-          <h2 className="text-xl font-semibold">Registration Submitted!</h2>
+          <Mail className="h-16 w-16 text-primary mx-auto" />
+          <h2 className="text-xl font-semibold">Check Your Email!</h2>
           <p className="text-muted-foreground">
-            An administrator will review and activate your account. You will be
-            notified once your account is approved.
+            We&apos;ve sent a verification link to your email address. Please click
+            the link to verify your email. After verification, an administrator
+            will review and activate your account.
           </p>
           <Link href="/login">
             <Button className="mt-4">Back to Login</Button>

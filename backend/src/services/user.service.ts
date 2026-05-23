@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import { Role, UserStatus, Prisma } from "@prisma/client";
 import prisma from "../config/db";
@@ -51,7 +52,6 @@ export async function getUserById(id: number) {
 
 export interface CreateInternalUserInput {
   email: string;
-  password: string;
   fullName: string;
   role: "ADMIN" | "PROCUREMENT_OFFICER" | "EVALUATOR";
   department?: string;
@@ -59,11 +59,13 @@ export interface CreateInternalUserInput {
   organizationName?: string;
 }
 
-export async function createInternalUser(input: CreateInternalUserInput) {
+export async function createInternalUser(input: CreateInternalUserInput, adminName: string) {
   const existing = await prisma.user.findUnique({ where: { email: input.email } });
   if (existing) throw new ApiError(409, "An account with this email already exists");
 
-  const hashedPassword = await bcrypt.hash(input.password, 12);
+  // Generate random placeholder password (user will set real one via invitation)
+  const placeholderPassword = crypto.randomBytes(32).toString("hex");
+  const hashedPassword = await bcrypt.hash(placeholderPassword, 12);
 
   const user = await prisma.user.create({
     data: {
@@ -71,7 +73,7 @@ export async function createInternalUser(input: CreateInternalUserInput) {
       email: input.email,
       password: hashedPassword,
       role: input.role,
-      status: "ACTIVE",
+      status: "INVITED",
       ...(input.role === "PROCUREMENT_OFFICER" && {
         officerProfile: {
           create: {
@@ -84,6 +86,25 @@ export async function createInternalUser(input: CreateInternalUserInput) {
     },
     include: { officerProfile: true },
     omit: { password: true },
+  });
+
+  // Generate invitation token (48 hours)
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+  await prisma.emailVerificationToken.create({
+    data: { token, type: "INVITATION", expiresAt, userId: user.id },
+  });
+
+  const clientUrl = process.env.CORS_ORIGIN || "http://localhost:3000";
+  const invitationUrl = `${clientUrl}/accept-invitation?token=${token}`;
+  const { sendInvitationEmail } = await import("../utils/email");
+  await sendInvitationEmail({
+    toEmail: input.email,
+    fullName: input.fullName,
+    role: input.role.replace(/_/g, " "),
+    invitedByName: adminName,
+    invitationUrl,
   });
 
   return user;
@@ -242,4 +263,40 @@ export async function getAdminStats() {
       userName: a.performedUser.fullName,
     })),
   };
+}
+
+export async function resendInvitation(userId: number, adminName: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new ApiError(404, "User not found");
+  if (user.status !== "INVITED") throw new ApiError(400, "User has already accepted their invitation");
+
+  // Rate limit: 2 minutes
+  const recentToken = await prisma.emailVerificationToken.findFirst({
+    where: { userId, type: "INVITATION", createdAt: { gt: new Date(Date.now() - 2 * 60 * 1000) } },
+  });
+  if (recentToken) throw new ApiError(429, "Please wait before resending the invitation");
+
+  // Invalidate old tokens
+  await prisma.emailVerificationToken.updateMany({
+    where: { userId, used: false, type: "INVITATION" },
+    data: { used: true },
+  });
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+  await prisma.emailVerificationToken.create({
+    data: { token, type: "INVITATION", expiresAt, userId },
+  });
+
+  const clientUrl = process.env.CORS_ORIGIN || "http://localhost:3000";
+  const invitationUrl = `${clientUrl}/accept-invitation?token=${token}`;
+  const { sendInvitationEmail } = await import("../utils/email");
+  await sendInvitationEmail({
+    toEmail: user.email,
+    fullName: user.fullName,
+    role: user.role.replace(/_/g, " "),
+    invitedByName: adminName,
+    invitationUrl,
+  });
 }

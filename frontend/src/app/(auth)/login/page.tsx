@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, FormEvent } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Landmark, Loader2 } from "lucide-react";
+import { Landmark, Loader2, Mail } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import api from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +24,9 @@ type LoginForm = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const { login } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [resendEmail, setResendEmail] = useState("");
+  const [isResending, setIsResending] = useState(false);
 
   const {
     register,
@@ -34,13 +38,31 @@ export default function LoginPage() {
 
   const onSubmit = async (data: LoginForm) => {
     setIsSubmitting(true);
+    setLoginError("");
     try {
       await login(data.email, data.password);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || "Login failed");
+      const message = error.response?.data?.message || "Login failed";
+      setLoginError(message);
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleResendVerification = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!resendEmail) return;
+    setIsResending(true);
+    try {
+      await api.post("/auth/resend-verification", { email: resendEmail });
+      toast.success("Verification email sent! Please check your inbox.");
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || "Failed to resend verification email");
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -106,6 +128,36 @@ export default function LoginPage() {
           </Link>
         </CardFooter>
       </form>
+      {loginError.toLowerCase().includes("verify your email") && (
+        <div className="px-6 pb-6">
+          <div className="rounded-lg border border-muted bg-muted/30 p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Mail className="h-4 w-4" />
+              <span>Didn&apos;t receive the verification email?</span>
+            </div>
+            <form onSubmit={handleResendVerification} className="flex gap-2">
+              <Input
+                type="email"
+                placeholder="Enter your email"
+                value={resendEmail}
+                onChange={(e) => setResendEmail(e.target.value)}
+                className="text-sm h-8"
+                required
+              />
+              <Button
+                type="submit"
+                variant="outline"
+                size="sm"
+                disabled={isResending}
+                className="shrink-0"
+              >
+                {isResending && <Loader2 className="mr-1 h-3 w-3 animate-spin" />}
+                Resend
+              </Button>
+            </form>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

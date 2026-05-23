@@ -199,3 +199,81 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
     next(err);
   }
 }
+
+export async function verifyEmail(req: Request, res: Response, next: NextFunction) {
+  try {
+    const schema = z.object({
+      token: z.string().min(1, "Verification token is required"),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstError = parsed.error.errors[0]?.message || "Validation failed";
+      throw new ApiError(400, firstError);
+    }
+
+    const result = await authService.verifyEmail(parsed.data.token);
+
+    return ApiResponse.success(res, "Email verified successfully. Your account is now pending admin approval.", result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resendVerification(req: Request, res: Response, next: NextFunction) {
+  try {
+    const schema = z.object({
+      email: z.string().email("Invalid email address"),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstError = parsed.error.errors[0]?.message || "Validation failed";
+      throw new ApiError(400, firstError);
+    }
+
+    await authService.resendVerificationEmail(parsed.data.email);
+
+    return ApiResponse.success(res, "Verification email has been resent. Please check your inbox.");
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function getInvitationDetails(req: Request, res: Response, next: NextFunction) {
+  try {
+    const token = req.params.token;
+    if (!token) throw new ApiError(400, "Invitation token is required");
+
+    const result = await authService.getInvitationDetails(token);
+
+    return ApiResponse.success(res, "Invitation details retrieved", result);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function acceptInvitation(req: Request, res: Response, next: NextFunction) {
+  try {
+    const schema = z.object({
+      token: z.string().min(1, "Invitation token is required"),
+      newPassword: z
+        .string()
+        .min(8, "Password must be at least 8 characters")
+        .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+        .regex(/[0-9]/, "Password must contain at least one number"),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstError = parsed.error.errors[0]?.message || "Validation failed";
+      throw new ApiError(400, firstError);
+    }
+
+    const result = await authService.acceptInvitation(parsed.data.token, parsed.data.newPassword);
+
+    return ApiResponse.success(res, "Account has been set up successfully. You can now log in.", result);
+  } catch (err) {
+    next(err);
+  }
+}

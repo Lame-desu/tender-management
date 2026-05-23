@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import { BidderType } from "@prisma/client";
 import prisma from "../config/db";
 import { ApiError } from "../utils/ApiError";
-import { sendPasswordResetEmail } from "../utils/email";
+import { sendPasswordResetEmail, sendEmailVerificationEmail } from "../utils/email";
 
 export interface RegisterInput {
   email: string;
@@ -33,7 +33,7 @@ export async function registerBidder(input: RegisterInput) {
       email: input.email,
       password: hashedPassword,
       role: "BIDDER",
-      status: "PENDING",
+      status: "PENDING_VERIFICATION",
       bidderProfile: {
         create: {
           bidderType: input.bidderType,
@@ -54,6 +54,18 @@ export async function registerBidder(input: RegisterInput) {
       status: true,
     },
   });
+
+  // Generate verification token (24 hours)
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  await prisma.emailVerificationToken.create({
+    data: { token, type: "VERIFICATION", expiresAt, userId: user.id },
+  });
+
+  const clientUrl = process.env.CORS_ORIGIN || "http://localhost:3000";
+  const verificationUrl = `${clientUrl}/verify-email?token=${token}`;
+  await sendEmailVerificationEmail(user.email, user.fullName, verificationUrl);
 
   return user;
 }
@@ -78,6 +90,12 @@ export async function loginUser(email: string, password: string) {
 
   if (user.status === "PENDING") {
     throw new ApiError(403, "Your account is pending admin verification");
+  }
+  if (user.status === "PENDING_VERIFICATION") {
+    throw new ApiError(403, "Please verify your email address first. Check your inbox for the verification link.");
+  }
+  if (user.status === "INVITED") {
+    throw new ApiError(403, "Please accept your invitation first. Check your inbox for the invitation link.");
   }
   if (user.status === "INACTIVE") {
     throw new ApiError(403, "Your account has been deactivated");
@@ -169,4 +187,109 @@ export async function resetPassword(token: string, newPassword: string) {
   ]);
 
   return { success: true };
+}
+
+export async function verifyEmail(token: string) {
+  const verificationToken = await prisma.emailVerificationToken.findUnique({
+    where: { token },
+    include: { user: true },
+  });
+
+  if (!verificationToken) throw new ApiError(400, "Invalid verification link");
+  if (verificationToken.used) throw new ApiError(400, "This verification link has already been used");
+  if (verificationToken.expiresAt < new Date()) throw new ApiError(400, "This verification link has expired. Please request a new one");
+  if (verificationToken.type !== "VERIFICATION") throw new ApiError(400, "Invalid token type");
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: verificationToken.userId },
+      data: { status: "PENDING" },
+    }),
+    prisma.emailVerificationToken.update({
+      where: { id: verificationToken.id },
+      data: { used: true },
+    }),
+  ]);
+
+  return { email: verificationToken.user.email };
+}
+
+export async function resendVerificationEmail(email: string) {
+  const user = await prisma.user.findUnique({ where: { email } });
+
+  if (!user) throw new ApiError(404, "No account found with this email");
+  if (user.status !== "PENDING_VERIFICATION") {
+    throw new ApiError(400, "This account does not require email verification");
+  }
+
+  // Rate limit: check if a token was sent in the last 2 minutes
+  const recentToken = await prisma.emailVerificationToken.findFirst({
+    where: { userId: user.id, type: "VERIFICATION", createdAt: { gt: new Date(Date.now() - 2 * 60 * 1000) } },
+  });
+  if (recentToken) throw new ApiError(429, "Please wait before requesting another verification email");
+
+  // Invalidate old tokens
+  await prisma.emailVerificationToken.updateMany({
+    where: { userId: user.id, used: false, type: "VERIFICATION" },
+    data: { used: true },
+  });
+
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  await prisma.emailVerificationToken.create({
+    data: { token, type: "VERIFICATION", expiresAt, userId: user.id },
+  });
+
+  const clientUrl = process.env.CORS_ORIGIN || "http://localhost:3000";
+  const verificationUrl = `${clientUrl}/verify-email?token=${token}`;
+  await sendEmailVerificationEmail(user.email, user.fullName, verificationUrl);
+}
+
+export async function getInvitationDetails(token: string) {
+  const invitationToken = await prisma.emailVerificationToken.findUnique({
+    where: { token },
+    include: { user: { select: { fullName: true, email: true, role: true } } },
+  });
+
+  if (!invitationToken) throw new ApiError(400, "Invalid invitation link");
+  if (invitationToken.used) throw new ApiError(400, "This invitation has already been used");
+  if (invitationToken.expiresAt < new Date()) throw new ApiError(400, "This invitation link has expired. Please contact your administrator");
+  if (invitationToken.type !== "INVITATION") throw new ApiError(400, "Invalid token type");
+
+  return { user: invitationToken.user };
+}
+
+export async function acceptInvitation(token: string, newPassword: string) {
+  const invitationToken = await prisma.emailVerificationToken.findUnique({
+    where: { token },
+    include: { user: true },
+  });
+
+  if (!invitationToken) throw new ApiError(400, "Invalid invitation link");
+  if (invitationToken.used) throw new ApiError(400, "This invitation has already been used");
+  if (invitationToken.expiresAt < new Date()) throw new ApiError(400, "This invitation link has expired. Please contact your administrator");
+  if (invitationToken.type !== "INVITATION") throw new ApiError(400, "Invalid token type");
+  if (invitationToken.user.status !== "INVITED") throw new ApiError(400, "This account has already been set up");
+
+  const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+  await prisma.$transaction([
+    prisma.user.update({
+      where: { id: invitationToken.userId },
+      data: { password: hashedPassword, status: "ACTIVE" },
+    }),
+    prisma.emailVerificationToken.update({
+      where: { id: invitationToken.id },
+      data: { used: true },
+    }),
+  ]);
+
+  return {
+    user: {
+      fullName: invitationToken.user.fullName,
+      email: invitationToken.user.email,
+      role: invitationToken.user.role,
+    },
+  };
 }

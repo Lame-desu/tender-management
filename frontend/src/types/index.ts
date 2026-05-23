@@ -11,6 +11,8 @@ export enum UserStatus {
   ACTIVE = "ACTIVE",
   INACTIVE = "INACTIVE",
   PENDING = "PENDING",
+  PENDING_VERIFICATION = "PENDING_VERIFICATION",
+  INVITED = "INVITED",
 }
 
 export enum BidderType {
