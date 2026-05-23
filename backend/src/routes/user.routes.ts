@@ -12,5 +12,6 @@ router.get("/:id", userController.getUser);
 router.post("/", userController.createUser);
 router.patch("/:id/status", userController.updateStatus);
 router.patch("/:id/role", userController.updateRole);
+router.delete("/:id", userController.deleteUser);
 
 export default router;

@@ -151,3 +151,51 @@ export async function getMe(req: Request, res: Response, next: NextFunction) {
     next(err);
   }
 }
+
+export async function forgotPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const schema = z.object({
+      email: z.string().email("Invalid email address"),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstError = parsed.error.errors[0]?.message || "Validation failed";
+      throw new ApiError(400, firstError);
+    }
+
+    const result = await authService.requestPasswordReset(parsed.data.email);
+
+    // Return the preview URL so the frontend can show it (test/demo mode)
+    return ApiResponse.success(res, "If an account with that email exists, a reset link has been sent.", {
+      previewUrl: result.previewUrl,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const schema = z.object({
+      token: z.string().min(1, "Reset token is required"),
+      newPassword: z
+        .string()
+        .min(8, "Password must be at least 8 characters")
+        .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+        .regex(/[0-9]/, "Password must contain at least one number"),
+    });
+
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      const firstError = parsed.error.errors[0]?.message || "Validation failed";
+      throw new ApiError(400, firstError);
+    }
+
+    await authService.resetPassword(parsed.data.token, parsed.data.newPassword);
+
+    return ApiResponse.success(res, "Password has been reset successfully. You can now log in with your new password.");
+  } catch (err) {
+    next(err);
+  }
+}

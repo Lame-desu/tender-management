@@ -91,8 +91,14 @@ export default function SubmitBidPage() {
     if (!files) return;
     const arr = Array.from(files);
     const valid: File[] = [];
+    const allowedExts = [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".jpg", ".jpeg", ".png"];
 
     for (const f of arr) {
+      const ext = f.name.substring(f.name.lastIndexOf(".")).toLowerCase();
+      if (!allowedExts.includes(ext)) {
+        toast.error(`${f.name}: File type not allowed. Accepted: PDF, DOCX, DOC, XLSX, XLS, JPG, PNG`);
+        continue;
+      }
       if (f.size > MAX_SIZE) {
         toast.error(`${f.name} exceeds 10MB limit`);
         continue;

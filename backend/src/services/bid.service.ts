@@ -167,8 +167,40 @@ export async function listBidsForTender(tenderId: number, officerId: number, pag
   if (tender.createdBy !== officerId) throw new ApiError(403, "Access denied");
 
   const where = { tenderId };
+  const total = await prisma.bid.count({ where });
 
-  const [bids, total] = await Promise.all([
+  // Check if bids have been opened (any bid with status other than SUBMITTED)
+  const openedCount = await prisma.bid.count({
+    where: { tenderId, status: { not: "SUBMITTED" } },
+  });
+
+  const bidsOpened = openedCount > 0;
+
+  if (!bidsOpened) {
+    // Sealed view: return only count and submission timestamps (no names, amounts, documents)
+    const sealedBids = await prisma.bid.findMany({
+      where,
+      select: {
+        id: true,
+        submissionDate: true,
+        status: true,
+      },
+      orderBy: { submissionDate: "desc" },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+
+    return {
+      bids: sealedBids,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+      sealed: true,
+    };
+  }
+
+  // Bids have been opened: return full details
+  const [bids] = await Promise.all([
     prisma.bid.findMany({
       where,
       include: {
@@ -181,10 +213,9 @@ export async function listBidsForTender(tenderId: number, officerId: number, pag
       skip: (page - 1) * limit,
       take: limit,
     }),
-    prisma.bid.count({ where }),
   ]);
 
-  return { bids, total, page, totalPages: Math.ceil(total / limit) };
+  return { bids, total, page, totalPages: Math.ceil(total / limit), sealed: false };
 }
 
 export async function getBidderStats(bidderId: number) {

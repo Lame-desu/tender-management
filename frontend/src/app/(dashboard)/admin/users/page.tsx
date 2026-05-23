@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
-  Plus, Search, MoreHorizontal, Eye, UserCheck, UserX, Shield, Loader2,
+  Plus, Search, MoreHorizontal, Eye, UserCheck, UserX, Shield, Loader2, Trash2,
 } from "lucide-react";
 import api from "@/lib/api";
 import { User } from "@/types";
@@ -53,6 +53,7 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ user: User; action: "ACTIVE" | "INACTIVE" } | null>(null);
   const [roleChangeUser, setRoleChangeUser] = useState<User | null>(null);
+  const [deleteUser, setDeleteUser] = useState<User | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["users", page, search, roleFilter, statusFilter],
@@ -75,6 +76,12 @@ export default function UsersPage() {
     mutationFn: async (p: { id: number; role: string; department?: string; position?: string; organizationName?: string }) => { const { id, ...body } = p; await api.patch(`/users/${id}/role`, body); },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["users"] }); toast.success("Role updated"); setRoleChangeUser(null); },
     onError: (e: ApiErr) => toast.error(e.response?.data?.message || "Failed"),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: number) => { await api.delete(`/users/${id}`); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["users"] }); toast.success("User deleted"); setDeleteUser(null); },
+    onError: (e: ApiErr) => toast.error(e.response?.data?.message || "Failed to delete user"),
   });
 
   return (
@@ -144,6 +151,7 @@ export default function UsersPage() {
                       {u.status !== "ACTIVE" && <DropdownMenuItem onClick={() => setConfirmAction({ user: u, action: "ACTIVE" })}><UserCheck className="mr-2 h-4 w-4" />Activate</DropdownMenuItem>}
                       {u.status === "ACTIVE" && <DropdownMenuItem onClick={() => setConfirmAction({ user: u, action: "INACTIVE" })}><UserX className="mr-2 h-4 w-4" />Deactivate</DropdownMenuItem>}
                       <DropdownMenuItem onClick={() => setRoleChangeUser(u)}><Shield className="mr-2 h-4 w-4" />Change Role</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => setDeleteUser(u)} className="text-red-600 focus:text-red-600"><Trash2 className="mr-2 h-4 w-4" />Delete</DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>
@@ -165,6 +173,7 @@ export default function UsersPage() {
       {detailUser && <ViewDetailsDialog user={detailUser} onClose={() => setDetailUser(null)} />}
       {confirmAction && <ConfirmStatusDialog data={confirmAction} onClose={() => setConfirmAction(null)} onConfirm={() => statusMut.mutate({ id: confirmAction.user.id, status: confirmAction.action })} isLoading={statusMut.isPending} />}
       {roleChangeUser && <ChangeRoleDialog user={roleChangeUser} onClose={() => setRoleChangeUser(null)} onConfirm={(p) => roleMut.mutate(p)} isLoading={roleMut.isPending} />}
+      {deleteUser && <ConfirmDeleteDialog user={deleteUser} onClose={() => setDeleteUser(null)} onConfirm={() => deleteMut.mutate(deleteUser.id)} isLoading={deleteMut.isPending} />}
       <CreateUserDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={() => { qc.invalidateQueries({ queryKey: ["users"] }); setCreateOpen(false); }} />
     </div>
   );
@@ -246,14 +255,32 @@ function CreateUserDialog({ open, onClose, onCreated }: { open: boolean; onClose
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent><DialogHeader><DialogTitle>Create Internal User</DialogTitle><DialogDescription>Create a new admin, officer, or evaluator account.</DialogDescription></DialogHeader>
-        <div className="space-y-4">
-          <div className="space-y-2"><Label>Full Name *</Label><Input value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} /></div>
-          <div className="space-y-2"><Label>Email *</Label><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-          <div className="space-y-2"><Label>Password *</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+        <form autoComplete="off" className="space-y-4" onSubmit={(e) => e.preventDefault()}>
+          {/* Hidden decoy fields to absorb browser autofill */}
+          <input type="text" name="fake_user" autoComplete="username" style={{ display: 'none' }} tabIndex={-1} />
+          <input type="password" name="fake_pass" autoComplete="current-password" style={{ display: 'none' }} tabIndex={-1} />
+          <div className="space-y-2"><Label>Full Name *</Label><Input value={f.fullName} onChange={(e) => setF({ ...f, fullName: e.target.value })} autoComplete="nope" /></div>
+          <div className="space-y-2"><Label>Email *</Label><Input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} autoComplete="nope" /></div>
+          <div className="space-y-2"><Label>Password *</Label><Input type="password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="one-time-code" /></div>
           <div className="space-y-2"><Label>Role *</Label><Select value={f.role} onValueChange={(v) => setF({ ...f, role: v })}><SelectTrigger><SelectValue placeholder="Select role" /></SelectTrigger><SelectContent><SelectItem value="ADMIN">Admin</SelectItem><SelectItem value="PROCUREMENT_OFFICER">Procurement Officer</SelectItem><SelectItem value="EVALUATOR">Evaluator</SelectItem></SelectContent></Select></div>
           {isOfficer && (<><div className="space-y-2"><Label>Department *</Label><Input value={f.department} onChange={(e) => setF({ ...f, department: e.target.value })} /></div><div className="space-y-2"><Label>Position *</Label><Input value={f.position} onChange={(e) => setF({ ...f, position: e.target.value })} /></div><div className="space-y-2"><Label>Organization</Label><Input value={f.organizationName} onChange={(e) => setF({ ...f, organizationName: e.target.value })} /></div></>)}
-        </div>
+        </form>
         <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button><Button onClick={submit} disabled={sub || !canSubmit}>{sub && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create User</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function ConfirmDeleteDialog({ user, onClose, onConfirm, isLoading }: { user: User; onClose: () => void; onConfirm: () => void; isLoading: boolean }) {
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Delete User</DialogTitle>
+          <DialogDescription>Are you sure you want to permanently delete <strong>{user.fullName}</strong>? This action cannot be undone.</DialogDescription>
+        </DialogHeader>
+        <DialogFooter><Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="destructive" onClick={onConfirm} disabled={isLoading}>{isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Delete</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

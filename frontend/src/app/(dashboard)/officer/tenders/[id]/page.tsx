@@ -290,11 +290,12 @@ export default function TenderDetailPage() {
 function BidsTab({ tenderId, tenderStatus, deadlinePassed, bidCount }: { tenderId: number; tenderStatus: string; deadlinePassed: boolean; bidCount: number }) {
   const qc = useQueryClient();
   const [expandedBid, setExpandedBid] = useState<number | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const { data: bidsData, isLoading } = useQuery({
     queryKey: ["tender-bids", tenderId],
     queryFn: async () => (await api.get(`/tenders/${tenderId}/bids?limit=100`)).data.data as {
-      bids: BidWithOwner[]; total: number;
+      bids: BidWithOwner[]; total: number; sealed?: boolean;
     },
   });
 
@@ -303,34 +304,119 @@ function BidsTab({ tenderId, tenderStatus, deadlinePassed, bidCount }: { tenderI
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tender", tenderId] });
       qc.invalidateQueries({ queryKey: ["tender-bids", tenderId] });
-      toast.success("Bids opened successfully");
+      toast.success("Bids opened successfully — all bidders have been notified");
+      setConfirmOpen(false);
     },
-    onError: (e: ApiErr) => toast.error(e.response?.data?.message || "Failed to open bids"),
+    onError: (e: ApiErr) => { toast.error(e.response?.data?.message || "Failed to open bids"); setConfirmOpen(false); },
   });
 
-  const showOpenButton = tenderStatus === "PUBLISHED" && deadlinePassed && bidCount > 0;
+  const isSealed = bidsData?.sealed === true;
   const bids = bidsData?.bids || [];
+  const total = bidsData?.total ?? bidCount;
 
-  return (
-    <div className="space-y-4">
-      {showOpenButton && (
-        <Card>
-          <CardContent className="pt-6 flex items-center justify-between">
-            <div>
-              <p className="font-medium">Submission deadline has passed</p>
-              <p className="text-sm text-muted-foreground">{bidCount} bid(s) received. Open bids to begin the evaluation process.</p>
+  // State 1: Still accepting bids (deadline not passed)
+  if (!deadlinePassed && tenderStatus === "PUBLISHED") {
+    return (
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-col items-center text-center py-8 space-y-4">
+            <div className="h-16 w-16 rounded-full bg-blue-50 flex items-center justify-center">
+              <Shield className="h-8 w-8 text-blue-500" />
             </div>
-            <Button onClick={() => openMut.mutate()} disabled={openMut.isPending}>
-              {openMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Open Bids
-            </Button>
+            <div>
+              <h3 className="text-lg font-semibold">Accepting Bids</h3>
+              <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                This tender is currently open for bid submissions. Bid details are sealed and will remain hidden until the submission deadline passes and you choose to open them.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 bg-muted/50 rounded-lg px-4 py-2">
+              <FileText className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">{total} bid{total !== 1 ? "s" : ""} received so far</span>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // State 2: Sealed — deadline passed but bids not yet opened
+  if (isSealed && deadlinePassed) {
+    return (
+      <div className="space-y-4">
+        <Card className="border-amber-200 bg-gradient-to-b from-amber-50/50 to-white">
+          <CardContent className="pt-6">
+            <div className="flex flex-col items-center text-center py-8 space-y-5">
+              <div className="relative">
+                <div className="h-20 w-20 rounded-full bg-amber-100 flex items-center justify-center">
+                  <Shield className="h-10 w-10 text-amber-600" />
+                </div>
+                <div className="absolute -bottom-1 -right-1 h-8 w-8 rounded-full bg-white border-2 border-amber-200 flex items-center justify-center">
+                  <span className="text-base">🔒</span>
+                </div>
+              </div>
+              <div>
+                <h3 className="text-xl font-bold">Bids Are Sealed</h3>
+                <p className="text-sm text-muted-foreground mt-2 max-w-lg">
+                  The submission deadline has passed. <strong>{total} bid{total !== 1 ? "s have" : " has"}</strong> been received.
+                  Bid details (bidder names, amounts, and documents) are hidden until you officially open them.
+                </p>
+              </div>
+
+              <div className="bg-white border border-amber-200 rounded-lg p-4 w-full max-w-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">Bids received</span>
+                  <span className="text-2xl font-bold text-amber-700">{total}</span>
+                </div>
+              </div>
+
+              <Button
+                size="lg"
+                className="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 shadow-md shadow-amber-500/20 h-12 px-8"
+                onClick={() => setConfirmOpen(true)}
+                disabled={total === 0}
+              >
+                <Shield className="mr-2 h-5 w-5" />
+                Open Bids
+              </Button>
+
+              <p className="text-xs text-muted-foreground max-w-sm">
+                Opening bids will reveal all bid details and notify every bidder that their submissions have been opened.
+              </p>
+            </div>
           </CardContent>
         </Card>
-      )}
 
+        {/* Confirmation Dialog */}
+        {confirmOpen && (
+          <Dialog open onOpenChange={() => setConfirmOpen(false)}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle>Open All Bids?</DialogTitle>
+                <DialogDescription>
+                  This will unseal all {total} bid{total !== 1 ? "s" : ""} and reveal bidder names, amounts, and documents. All bidders will be notified that their bids have been opened. This action cannot be undone.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+                <Button onClick={() => openMut.mutate()} disabled={openMut.isPending}>
+                  {openMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Yes, Open Bids
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+    );
+  }
+
+  // State 3: Bids opened — show full table
+  return (
+    <div className="space-y-4">
       {isLoading ? (
         <div className="flex justify-center py-10"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
       ) : bids.length === 0 ? (
-        <Card><CardContent className="py-8 text-center text-muted-foreground">No bids submitted yet.</CardContent></Card>
+        <Card><CardContent className="py-8 text-center text-muted-foreground">No bids submitted.</CardContent></Card>
       ) : (
         <div className="border rounded-lg bg-white">
           <Table>

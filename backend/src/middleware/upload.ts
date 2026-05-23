@@ -1,7 +1,7 @@
-import multer from "multer";
+import multer, { MulterError } from "multer";
 import path from "path";
 import fs from "fs";
-import { Request } from "express";
+import { Request, Response, NextFunction } from "express";
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "./uploads";
 const MAX_FILE_SIZE = parseInt(process.env.MAX_FILE_SIZE || "10485760", 10); // 10MB
@@ -44,6 +44,43 @@ export const upload = multer({
   fileFilter,
   limits: { fileSize: MAX_FILE_SIZE },
 });
+
+/**
+ * Wraps a multer middleware to catch multer errors (file type, file size, etc.)
+ * and return a proper 400 JSON response instead of crashing with a 500.
+ */
+export function handleUpload(multerMiddleware: ReturnType<typeof upload.fields>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    multerMiddleware(req, res, (err: unknown) => {
+      if (err) {
+        if (err instanceof MulterError) {
+          // Multer-specific errors (file size limit, too many files, etc.)
+          const messages: Record<string, string> = {
+            LIMIT_FILE_SIZE: `File too large. Maximum size is ${MAX_FILE_SIZE / (1024 * 1024)}MB`,
+            LIMIT_FILE_COUNT: "Too many files uploaded",
+            LIMIT_UNEXPECTED_FILE: "Unexpected file field",
+          };
+          return res.status(400).json({
+            success: false,
+            message: messages[err.code] || err.message,
+          });
+        }
+        // Custom errors from fileFilter
+        if (err instanceof Error) {
+          return res.status(400).json({
+            success: false,
+            message: err.message,
+          });
+        }
+        return res.status(500).json({
+          success: false,
+          message: "File upload failed",
+        });
+      }
+      next();
+    });
+  };
+}
 
 export function moveBidFiles(bidId: number, files: Express.Multer.File[]): Express.Multer.File[] {
   const destDir = path.join(UPLOAD_DIR, "bids", String(bidId));

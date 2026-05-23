@@ -162,6 +162,32 @@ export async function updateRole(req: Request, res: Response, next: NextFunction
   }
 }
 
+// ─── DELETE USER ──────────────────────────────────────────────────────────────
+
+export async function deleteUser(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) throw new ApiError(400, "Invalid user ID");
+
+    const result = await userService.deleteUser(id, req.user!.id);
+
+    await prisma.auditLog.create({
+      data: {
+        action: "Deleted user account",
+        entityType: "User",
+        entityId: id,
+        performedBy: req.user!.id,
+        ipAddress: req.ip || req.socket.remoteAddress || undefined,
+        details: `Deleted user: ${result.fullName}`,
+      },
+    });
+
+    return ApiResponse.success(res, "User deleted successfully");
+  } catch (err) {
+    next(err);
+  }
+}
+
 // ─── ADMIN STATS ──────────────────────────────────────────────────────────────
 
 export async function getStats(req: Request, res: Response, next: NextFunction) {

@@ -160,6 +160,43 @@ export async function updateUserRole(
   return updated;
 }
 
+export async function deleteUser(userId: number, adminId: number) {
+  if (userId === adminId) throw new ApiError(400, "You cannot delete your own account");
+
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new ApiError(404, "User not found");
+
+  // Check for related records that would prevent deletion
+  const [tenderCount, bidCount, evaluationCount, committeeCount] = await Promise.all([
+    prisma.tender.count({ where: { createdBy: userId } }),
+    prisma.bid.count({ where: { bidderId: userId } }),
+    prisma.evaluation.count({ where: { evaluatorId: userId } }),
+    prisma.evaluationCommitteeAssignment.count({ where: { userId } }),
+  ]);
+
+  if (tenderCount > 0) {
+    throw new ApiError(400, `Cannot delete user: they have ${tenderCount} tender(s) in the system`);
+  }
+  if (bidCount > 0) {
+    throw new ApiError(400, `Cannot delete user: they have ${bidCount} bid(s) in the system`);
+  }
+  if (evaluationCount > 0) {
+    throw new ApiError(400, `Cannot delete user: they have ${evaluationCount} evaluation(s) in the system`);
+  }
+  if (committeeCount > 0) {
+    throw new ApiError(400, `Cannot delete user: they are assigned to ${committeeCount} evaluation committee(s)`);
+  }
+
+  // Delete related records that cascade or can be safely removed
+  await prisma.notification.deleteMany({ where: { userId } });
+  await prisma.bidder.deleteMany({ where: { userId } });
+  await prisma.procurementOfficer.deleteMany({ where: { userId } });
+
+  await prisma.user.delete({ where: { id: userId } });
+
+  return { id: userId, fullName: user.fullName };
+}
+
 export async function getAdminStats() {
   const [
     usersByRole,

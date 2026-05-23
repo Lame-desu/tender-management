@@ -1,7 +1,7 @@
 import { Router } from "express";
 import * as bc from "../controllers/bid.controller";
 import { authenticate, authorize } from "../middleware/auth";
-import { upload } from "../middleware/upload";
+import { upload, handleUpload } from "../middleware/upload";
 
 const router = Router();
 
@@ -10,10 +10,10 @@ router.use(authenticate);
 router.post(
   "/tenders/:tenderId/bids",
   authorize("BIDDER"),
-  upload.fields([
+  handleUpload(upload.fields([
     { name: "technicalDocs", maxCount: 10 },
     { name: "otherDocs", maxCount: 10 },
-  ]),
+  ])),
   bc.submitBid
 );
 

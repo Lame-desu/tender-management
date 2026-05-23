@@ -80,6 +80,14 @@ export default function LoginPage() {
             {errors.password && (
               <p className="text-sm text-destructive">{errors.password.message}</p>
             )}
+            <div className="flex justify-end">
+              <Link
+                href="/forgot-password"
+                className="text-xs text-primary hover:underline font-medium"
+              >
+                Forgot password?
+              </Link>
+            </div>
           </div>
         </CardContent>
         <CardFooter className="flex flex-col gap-4">
