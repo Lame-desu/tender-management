@@ -183,7 +183,7 @@ export async function publishResults(req: Request, res: Response, next: NextFunc
     const result = await evalService.publishResults(tenderId, req.user!.id);
     await audit(req, "Published tender results", "Tender", tenderId);
 
-    return ApiResponse.success(res, result.message);
+    return ApiResponse.success(res, result.message, { emailsSent: result.emailsSent });
   } catch (err) { next(err); }
 }
 

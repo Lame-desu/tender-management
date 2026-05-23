@@ -1,12 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { toast } from "sonner";
 import {
-  Loader2, FileText, Download, ChevronDown, ChevronUp, CheckCircle2, Trophy,
+  Loader2, FileText, Download, CheckCircle2, Trophy, ArrowLeft,
+  ChevronRight, AlertCircle, Info, Send, Star,
 } from "lucide-react";
+import { format } from "date-fns";
 import api from "@/lib/api";
 import { EvaluationCriteria, BidDocument } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -18,6 +21,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type ApiErr = { response?: { data?: { message?: string } } };
 
@@ -53,6 +58,197 @@ interface FinancialBid {
   bidAmount: number; financialScore: number; combinedScore: number; rank: number;
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ScoreBar({ score, max }: { score: number; max: number }) {
+  const pct = max > 0 ? Math.min((score / max) * 100, 100) : 0;
+  const color = pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-500" : "bg-red-400";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ease-out ${color}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs font-semibold text-muted-foreground w-16 text-right">
+        {score.toFixed(1)}/{max}
+      </span>
+    </div>
+  );
+}
+
+function BidScoreCard({
+  bid,
+  criteria,
+  scores,
+  remarks,
+  hasSubmitted,
+  onScoreChange,
+  onRemarkChange,
+  getBidTotal,
+}: {
+  bid: TechBid;
+  criteria: EvaluationCriteria[];
+  scores: Record<number, Record<string, number>>;
+  remarks: Record<number, string>;
+  hasSubmitted: boolean;
+  onScoreChange: (bidId: number, criteriaName: string, value: number) => void;
+  onRemarkChange: (bidId: number, value: string) => void;
+  getBidTotal: (bidId: number) => number;
+}) {
+  const totalMax = criteria.reduce((s, c) => s + c.weight, 0);
+  const currentTotal = getBidTotal(bid.id);
+
+  return (
+    <Card className="overflow-hidden border-0 shadow-md hover:shadow-lg transition-all duration-300">
+      {/* Bid Header */}
+      <div className="bg-gradient-to-r from-slate-50 to-white border-b px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md">
+              {bid.bidderName.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <h3 className="font-semibold text-foreground">{bid.bidderName}</h3>
+              <p className="text-xs text-muted-foreground">
+                Submitted {format(new Date(bid.submissionDate), "MMM d, yyyy 'at' h:mm a")}
+              </p>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-2xl font-bold text-foreground">
+              {currentTotal.toFixed(1)}
+              <span className="text-sm font-normal text-muted-foreground">/{totalMax}</span>
+            </div>
+            <ScoreBar score={currentTotal} max={totalMax} />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-0">
+        {/* Left Side: Bid Information */}
+        <div className="p-6 lg:border-r space-y-4">
+          {/* Technical Proposal */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <FileText className="h-4 w-4 text-blue-500" />
+              <h4 className="text-sm font-semibold text-foreground">Technical Proposal</h4>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-4 max-h-48 overflow-y-auto text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed border">
+              {bid.technicalProposal}
+            </div>
+          </div>
+
+          {/* Documents */}
+          {bid.documents.length > 0 && (
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="h-4 w-4 text-violet-500" />
+                <h4 className="text-sm font-semibold text-foreground">Documents ({bid.documents.length})</h4>
+              </div>
+              <div className="space-y-1.5">
+                {bid.documents.map((doc) => (
+                  <div key={doc.id} className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg border hover:border-blue-200 transition-colors group">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="h-8 w-8 rounded-md bg-blue-100 flex items-center justify-center flex-shrink-0">
+                        <FileText className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{doc.fileName}</p>
+                        <p className="text-xs text-muted-foreground">{formatFileSize(doc.fileSize)}</p>
+                      </div>
+                    </div>
+                    <a
+                      href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/files/${doc.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Button variant="ghost" size="icon" className="h-8 w-8 opacity-60 group-hover:opacity-100 transition-opacity">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </a>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Bid Security */}
+          <div className="flex items-center gap-2 text-sm">
+            <div className={`h-2 w-2 rounded-full ${bid.bidSecurityInfo ? "bg-emerald-500" : "bg-red-400"}`} />
+            <span className="text-muted-foreground">
+              Bid Security: {bid.bidSecurityInfo ? "Provided" : "Not provided"}
+            </span>
+          </div>
+        </div>
+
+        {/* Right Side: Scoring Form */}
+        <div className="p-6 bg-gradient-to-b from-blue-50/30 to-white space-y-4">
+          <div className="flex items-center gap-2 mb-1">
+            <Star className="h-4 w-4 text-amber-500" />
+            <h4 className="text-sm font-semibold text-foreground">Score This Bid</h4>
+            {hasSubmitted && (
+              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 ml-auto text-xs">
+                <CheckCircle2 className="h-3 w-3 mr-1" />Submitted
+              </Badge>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {criteria.map((c) => {
+              const value = scores[bid.id]?.[c.name] ?? 0;
+              const isValid = value >= 0 && value <= c.weight;
+              return (
+                <div key={c.name} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-medium">{c.name}</Label>
+                    <span className="text-xs text-muted-foreground">max {c.weight}</span>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={c.weight}
+                      step={0.5}
+                      value={value}
+                      onChange={(e) => onScoreChange(bid.id, c.name, Math.min(c.weight, Math.max(0, parseFloat(e.target.value) || 0)))}
+                      disabled={hasSubmitted}
+                      className={`pr-12 ${!isValid ? "border-red-300 focus-visible:ring-red-400" : "focus-visible:ring-blue-400"}`}
+                    />
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <span className="text-xs text-muted-foreground">/ {c.weight}</span>
+                    </div>
+                  </div>
+                  <ScoreBar score={value} max={c.weight} />
+                </div>
+              );
+            })}
+          </div>
+
+          <Separator />
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Remarks (optional)</Label>
+            <Textarea
+              rows={3}
+              value={remarks[bid.id] || ""}
+              onChange={(e) => onRemarkChange(bid.id, e.target.value)}
+              disabled={hasSubmitted}
+              placeholder="Add your comments on this bid..."
+              className="resize-none focus-visible:ring-blue-400"
+            />
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function EvaluatePage() {
   const { id } = useParams();
   const qc = useQueryClient();
@@ -60,7 +256,6 @@ export default function EvaluatePage() {
 
   const [scores, setScores] = useState<Record<number, Record<string, number>>>({});
   const [remarks, setRemarks] = useState<Record<number, string>>({});
-  const [expandedBid, setExpandedBid] = useState<number | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -139,17 +334,6 @@ export default function EvaluatePage() {
     },
   });
 
-  if (isLoading || !data) {
-    return (
-      <div className="flex justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  const { tender, bids } = data;
-  const criteria = tender.evaluationCriteria;
-
   const setScore = (bidId: number, criteriaName: string, value: number) => {
     setScores((prev) => ({
       ...prev,
@@ -157,169 +341,221 @@ export default function EvaluatePage() {
     }));
   };
 
+  const setRemark = (bidId: number, value: string) => {
+    setRemarks((prev) => ({ ...prev, [bidId]: value }));
+  };
+
   const getBidTotal = (bidId: number) => {
     const bidScores = scores[bidId] || {};
     return Object.values(bidScores).reduce((sum, v) => sum + (v || 0), 0);
   };
 
-  const allValid = bids.every((bid) =>
-    criteria.every((c) => {
-      const score = scores[bid.id]?.[c.name] ?? -1;
-      return score >= 0 && score <= c.weight;
-    })
-  );
+  const allValid = useMemo(() => {
+    if (!data) return false;
+    return data.bids.every((bid) =>
+      data.tender.evaluationCriteria.every((c) => {
+        const score = scores[bid.id]?.[c.name] ?? -1;
+        return score >= 0 && score <= c.weight;
+      })
+    );
+  }, [data, scores]);
+
+  // Summary for confirmation dialog
+  const confirmSummary = useMemo(() => {
+    if (!data) return [];
+    return data.bids.map((bid) => ({
+      name: bid.bidderName,
+      total: getBidTotal(bid.id),
+      max: data.tender.evaluationCriteria.reduce((s, c) => s + c.weight, 0),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, scores]);
+
+  if (isLoading || !data) {
+    return (
+      <div className="space-y-6 max-w-5xl">
+        {/* Skeleton breadcrumb */}
+        <Skeleton className="h-5 w-48" />
+        {/* Skeleton header */}
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-96" />
+          <Skeleton className="h-5 w-64" />
+        </div>
+        {/* Skeleton criteria card */}
+        <Skeleton className="h-48 w-full rounded-xl" />
+        {/* Skeleton bid cards */}
+        <Skeleton className="h-96 w-full rounded-xl" />
+        <Skeleton className="h-96 w-full rounded-xl" />
+      </div>
+    );
+  }
+
+  const { tender, bids } = data;
+  const criteria = tender.evaluationCriteria;
+  const totalMax = criteria.reduce((s, c) => s + c.weight, 0);
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      <div>
-        <h1 className="text-2xl font-bold">Technical Evaluation</h1>
-        <p className="text-muted-foreground mt-1">{tender.title}</p>
-        {hasSubmitted && (
-          <Badge variant="outline" className="bg-green-100 text-green-700 mt-2">
-            <CheckCircle2 className="h-3 w-3 mr-1" />Evaluation Submitted
-          </Badge>
-        )}
-      </div>
+    <TooltipProvider>
+      <div className="space-y-6 max-w-5xl">
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Link href="/evaluator/tenders" className="hover:text-foreground transition-colors flex items-center gap-1">
+            <ArrowLeft className="h-3.5 w-3.5" />
+            Assigned Tenders
+          </Link>
+          <ChevronRight className="h-3.5 w-3.5" />
+          <Link href={`/evaluator/tenders/${tender.id}`} className="hover:text-foreground transition-colors">
+            {tender.title}
+          </Link>
+          <ChevronRight className="h-3.5 w-3.5" />
+          <span className="text-foreground font-medium">Evaluation</span>
+        </nav>
 
-      {/* Criteria Reference */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Evaluation Criteria</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="border rounded-md overflow-hidden">
+        {/* Page Header */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-md">
+                <Star className="h-5 w-5 text-white" />
+              </div>
+              Technical Evaluation
+            </h1>
+            <p className="text-muted-foreground mt-1 ml-[52px]">{tender.title}</p>
+          </div>
+          {hasSubmitted && (
+            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 px-3 py-1.5">
+              <CheckCircle2 className="h-4 w-4 mr-1.5" />Evaluation Submitted
+            </Badge>
+          )}
+        </div>
+
+        {/* Evaluation Criteria Reference */}
+        <Card className="border-0 shadow-md overflow-hidden">
+          <CardHeader className="bg-gradient-to-r from-slate-50 to-white border-b pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Info className="h-4 w-4 text-blue-500" />
+                Evaluation Criteria
+              </CardTitle>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Badge variant="outline" className="text-xs">
+                    Min Score: {tender.minimumTechnicalScore}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Bids must score at least {tender.minimumTechnicalScore} to qualify</p>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </CardHeader>
+          <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow>
+                <TableRow className="bg-slate-50/50">
                   <TableHead>Criterion</TableHead>
-                  <TableHead className="text-right">Weight (Max Score)</TableHead>
+                  <TableHead className="text-right w-32">Weight (Max Score)</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {criteria.map((c, i) => (
                   <TableRow key={i}>
-                    <TableCell>{c.name}</TableCell>
-                    <TableCell className="text-right font-medium">{c.weight}</TableCell>
+                    <TableCell className="font-medium">{c.name}</TableCell>
+                    <TableCell className="text-right">
+                      <Badge variant="outline" className="font-semibold">{c.weight}</Badge>
+                    </TableCell>
                   </TableRow>
                 ))}
-                <TableRow className="bg-muted/50">
-                  <TableCell className="font-semibold">Total</TableCell>
-                  <TableCell className="text-right font-semibold">{criteria.reduce((s, c) => s + c.weight, 0)}</TableCell>
+                <TableRow className="bg-blue-50/50 font-semibold">
+                  <TableCell>Total</TableCell>
+                  <TableCell className="text-right">
+                    <Badge className="bg-blue-600">{totalMax}</Badge>
+                  </TableCell>
                 </TableRow>
               </TableBody>
             </Table>
+          </CardContent>
+        </Card>
+
+        {/* Bid Evaluations */}
+        <div className="space-y-2">
+          <h2 className="text-lg font-semibold flex items-center gap-2">
+            <FileText className="h-5 w-5 text-blue-500" />
+            Bid Evaluations ({bids.length})
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Review each bid&apos;s technical proposal and documents, then assign scores for each criterion.
+          </p>
+        </div>
+
+        <div className="space-y-6">
+          {bids.map((bid) => (
+            <BidScoreCard
+              key={bid.id}
+              bid={bid}
+              criteria={criteria}
+              scores={scores}
+              remarks={remarks}
+              hasSubmitted={hasSubmitted}
+              onScoreChange={setScore}
+              onRemarkChange={setRemark}
+              getBidTotal={getBidTotal}
+            />
+          ))}
+        </div>
+
+        {/* Submit Button */}
+        {!hasSubmitted && bids.length > 0 && (
+          <div className="sticky bottom-4 z-10">
+            <Button
+              size="lg"
+              className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transition-all text-base py-6"
+              disabled={!allValid}
+              onClick={() => setConfirmOpen(true)}
+            >
+              <Send className="h-5 w-5 mr-2" />
+              Submit All Evaluations
+            </Button>
+            {!allValid && (
+              <p className="text-xs text-center text-amber-600 mt-2 flex items-center justify-center gap-1">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Please ensure all scores are within their valid ranges before submitting.
+              </p>
+            )}
           </div>
-          <p className="text-xs text-muted-foreground mt-2">Minimum Technical Score: {tender.minimumTechnicalScore}</p>
-        </CardContent>
-      </Card>
+        )}
 
-      {/* Bid Evaluations */}
-      {bids.map((bid) => (
-        <Card key={bid.id}>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base">{bid.bidderName}</CardTitle>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold">
-                  Total: {getBidTotal(bid.id).toFixed(1)} / {criteria.reduce((s, c) => s + c.weight, 0)}
-                </span>
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setExpandedBid(expandedBid === bid.id ? null : bid.id)}>
-                  {expandedBid === bid.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </Button>
+        {/* Submitted Success Card */}
+        {hasSubmitted && (
+          <Card className="border-0 shadow-md overflow-hidden bg-gradient-to-br from-emerald-50 to-white">
+            <CardContent className="py-8 text-center">
+              <div className="h-14 w-14 rounded-full bg-emerald-100 flex items-center justify-center mx-auto mb-3">
+                <CheckCircle2 className="h-7 w-7 text-emerald-600" />
               </div>
-            </div>
-          </CardHeader>
-
-          {expandedBid === bid.id && (
-            <CardContent className="pt-0 space-y-3 border-t">
-              <div className="mt-4">
-                <p className="text-xs text-muted-foreground">Technical Proposal</p>
-                <p className="text-sm whitespace-pre-wrap mt-1 max-h-40 overflow-y-auto">{bid.technicalProposal}</p>
-              </div>
-              {bid.documents.length > 0 && (
-                <div>
-                  <p className="text-xs text-muted-foreground mb-1">Documents</p>
-                  <div className="space-y-1">
-                    {bid.documents.map((doc) => (
-                      <div key={doc.id} className="flex items-center justify-between p-2 border rounded-md">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm">{doc.fileName}</span>
-                        </div>
-                        <a href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"}/files/${doc.id}`} target="_blank" rel="noopener noreferrer">
-                          <Button variant="ghost" size="icon" className="h-7 w-7"><Download className="h-3.5 w-3.5" /></Button>
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <p className="font-semibold text-lg text-emerald-900">Evaluation Submitted</p>
+              <p className="text-sm text-emerald-700/70 mt-1">
+                Waiting for other committee members to complete their evaluations.
+              </p>
             </CardContent>
-          )}
+          </Card>
+        )}
 
-          <CardContent className={expandedBid === bid.id ? "space-y-4" : "pt-0 space-y-4"}>
-            <Separator />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {criteria.map((c) => (
-                <div key={c.name} className="space-y-1">
-                  <Label className="text-xs">{c.name} (0-{c.weight})</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={c.weight}
-                    step={0.5}
-                    value={scores[bid.id]?.[c.name] ?? 0}
-                    onChange={(e) => setScore(bid.id, c.name, Math.min(c.weight, Math.max(0, parseFloat(e.target.value) || 0)))}
-                    disabled={hasSubmitted}
-                  />
+        {/* Financial Results */}
+        {financialData && financialData.bids.length > 0 && (
+          <Card className="border-0 shadow-md overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-amber-50 to-white border-b">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center shadow-sm">
+                  <Trophy className="h-4 w-4 text-white" />
                 </div>
-              ))}
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Remarks (optional)</Label>
-              <Textarea
-                rows={2}
-                value={remarks[bid.id] || ""}
-                onChange={(e) => setRemarks((prev) => ({ ...prev, [bid.id]: e.target.value }))}
-                disabled={hasSubmitted}
-                placeholder="Any comments on this bid..."
-              />
-            </div>
-          </CardContent>
-        </Card>
-      ))}
-
-      {/* Submit */}
-      {!hasSubmitted && bids.length > 0 && (
-        <Button size="lg" className="w-full" disabled={!allValid} onClick={() => setConfirmOpen(true)}>
-          Submit All Evaluations
-        </Button>
-      )}
-
-      {hasSubmitted && (
-        <Card>
-          <CardContent className="py-6 text-center">
-            <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto mb-2" />
-            <p className="font-medium">Evaluation submitted</p>
-            <p className="text-sm text-muted-foreground">Waiting for other committee members to complete their evaluations.</p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Financial Results (if available) */}
-      {financialData && financialData.bids.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Trophy className="h-5 w-5" />Financial Evaluation Results
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="border rounded-lg overflow-x-auto">
+                Financial Evaluation Results
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
               <Table>
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Rank</TableHead>
+                  <TableRow className="bg-slate-50/50">
+                    <TableHead className="w-16">Rank</TableHead>
                     <TableHead>Bidder</TableHead>
                     <TableHead className="text-center">Tech Score</TableHead>
                     <TableHead className="text-right">Bid Amount</TableHead>
@@ -329,39 +565,83 @@ export default function EvaluatePage() {
                 </TableHeader>
                 <TableBody>
                   {financialData.bids.map((b) => (
-                    <TableRow key={b.bidId} className={b.rank === 1 ? "bg-green-50" : ""}>
-                      <TableCell className="font-bold">#{b.rank}</TableCell>
-                      <TableCell className="font-medium">{b.bidderName} {b.rank === 1 && <Trophy className="h-3.5 w-3.5 inline text-green-600 ml-1" />}</TableCell>
+                    <TableRow key={b.bidId} className={b.rank === 1 ? "bg-emerald-50/70" : ""}>
+                      <TableCell>
+                        <div className={`h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                          b.rank === 1 ? "bg-gradient-to-br from-amber-400 to-amber-600 text-white shadow-sm" :
+                          b.rank === 2 ? "bg-slate-200 text-slate-700" :
+                          b.rank === 3 ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-500"
+                        }`}>
+                          {b.rank}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {b.bidderName}
+                        {b.rank === 1 && <Trophy className="h-4 w-4 inline text-amber-500 ml-1.5" />}
+                      </TableCell>
                       <TableCell className="text-center">{b.avgTechnicalScore.toFixed(1)}</TableCell>
-                      <TableCell className="text-right">ETB {b.bidAmount.toLocaleString()}</TableCell>
+                      <TableCell className="text-right font-mono">ETB {b.bidAmount.toLocaleString()}</TableCell>
                       <TableCell className="text-center">{b.financialScore.toFixed(1)}</TableCell>
-                      <TableCell className="text-center font-semibold">{b.combinedScore.toFixed(1)}</TableCell>
+                      <TableCell className="text-center">
+                        <Badge variant="outline" className={b.rank === 1 ? "bg-emerald-100 text-emerald-700 border-emerald-200" : ""}>
+                          {b.combinedScore.toFixed(1)}
+                        </Badge>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+            </CardContent>
+          </Card>
+        )}
 
-      {/* Confirm Dialog */}
-      {confirmOpen && (
-        <Dialog open onOpenChange={() => setConfirmOpen(false)}>
-          <DialogContent className="max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Submit Evaluation</DialogTitle>
-              <DialogDescription>Are you sure you want to submit your technical evaluation? You can update your scores until the officer finalizes.</DialogDescription>
-            </DialogHeader>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
-              <Button onClick={() => submitMut.mutate()} disabled={submitMut.isPending}>
-                {submitMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Submit
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-    </div>
+        {/* Confirm Dialog */}
+        {confirmOpen && (
+          <Dialog open onOpenChange={() => setConfirmOpen(false)}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Send className="h-5 w-5 text-blue-500" />
+                  Confirm Submission
+                </DialogTitle>
+                <DialogDescription>
+                  Review your scores below. You can update scores until the officer finalizes the evaluation.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3 my-2">
+                {confirmSummary.map((item, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="h-8 w-8 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white font-bold text-xs">
+                        {item.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-sm font-medium">{item.name}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-lg font-bold">{item.total.toFixed(1)}</span>
+                      <span className="text-xs text-muted-foreground">/{item.max}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+                <Button
+                  className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
+                  onClick={() => submitMut.mutate()}
+                  disabled={submitMut.isPending}
+                >
+                  {submitMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <Send className="mr-2 h-4 w-4" />
+                  Submit Evaluation
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+    </TooltipProvider>
   );
 }

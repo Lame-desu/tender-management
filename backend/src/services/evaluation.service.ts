@@ -210,7 +210,7 @@ export async function getTechnicalEvaluationData(tenderId: number, evaluatorId: 
   if (!tender) throw new ApiError(404, "Tender not found");
 
   const bids = await prisma.bid.findMany({
-    where: { tenderId, status: { in: ["OPENED", "TECHNICALLY_QUALIFIED", "TECHNICALLY_DISQUALIFIED", "EVALUATED"] } },
+    where: { tenderId, status: { in: ["OPENED", "TECHNICALLY_QUALIFIED", "TECHNICALLY_DISQUALIFIED", "EVALUATED", "SELECTED", "NOT_SELECTED"] } },
     include: {
       bidOwner: { select: { id: true, fullName: true, bidderProfile: { select: { organizationName: true } } } },
       documents: { where: { documentCategory: "TECHNICAL" } },
@@ -340,7 +340,7 @@ export async function getTechnicalEvaluationStatus(tenderId: number, userId: num
   const totalMembers = committee.length;
 
   const bids = await prisma.bid.findMany({
-    where: { tenderId, status: { in: ["OPENED", "TECHNICALLY_QUALIFIED", "TECHNICALLY_DISQUALIFIED", "EVALUATED"] } },
+    where: { tenderId, status: { in: ["OPENED", "TECHNICALLY_QUALIFIED", "TECHNICALLY_DISQUALIFIED", "EVALUATED", "SELECTED", "NOT_SELECTED"] } },
     include: {
       bidOwner: { select: { fullName: true, bidderProfile: { select: { organizationName: true } } } },
       evaluations: {
@@ -480,7 +480,7 @@ export async function getFinancialEvaluationData(tenderId: number, userId: numbe
   if (!hasFinalized) throw new ApiError(400, "Technical evaluation has not been finalized yet");
 
   const qualifiedBids = await prisma.bid.findMany({
-    where: { tenderId, status: { in: ["TECHNICALLY_QUALIFIED", "EVALUATED"] } },
+    where: { tenderId, status: { in: ["TECHNICALLY_QUALIFIED", "EVALUATED", "SELECTED", "NOT_SELECTED"] } },
     include: {
       bidOwner: { select: { fullName: true, bidderProfile: { select: { organizationName: true } } } },
       evaluationSummary: true,
@@ -607,7 +607,20 @@ export async function publishResults(tenderId: number, officerId: number) {
     where: { id: tenderId },
     include: {
       bids: {
-        include: { bidOwner: { select: { id: true } } },
+        include: {
+          bidOwner: {
+            select: {
+              id: true,
+              fullName: true,
+              email: true,
+              bidderProfile: { select: { organizationName: true } },
+            },
+          },
+          evaluationSummary: true,
+        },
+      },
+      committeeAssignments: {
+        include: { user: { select: { fullName: true } } },
       },
     },
   });
@@ -618,6 +631,7 @@ export async function publishResults(tenderId: number, officerId: number) {
   const winnerBid = tender.bids.find((b) => b.status === "SELECTED");
   const loserBids = tender.bids.filter((b) => b.status === "NOT_SELECTED");
 
+  // ── In-app notifications (existing behavior) ──
   const notifications = [];
   if (winnerBid) {
     notifications.push({
@@ -642,7 +656,103 @@ export async function publishResults(tenderId: number, officerId: number) {
     await prisma.notification.createMany({ data: notifications });
   }
 
-  return { message: "Results published" };
+  // ── Email notifications ──
+  const allBidsData = tender.bids
+    .filter((b) => ["SELECTED", "NOT_SELECTED", "EVALUATED"].includes(b.status))
+    .map((b) => ({
+      rank: b.evaluationSummary?.rank ?? null,
+      bidderName: b.bidOwner.bidderProfile?.organizationName || b.bidOwner.fullName,
+      bidAmount: b.bidAmount,
+      avgTechnicalScore: b.evaluationSummary?.avgTechnicalScore ?? null,
+      financialScore: b.evaluationSummary?.avgFinancialScore ?? null,
+      combinedScore: b.evaluationSummary?.combinedScore ?? null,
+      status: b.status === "SELECTED" ? "WINNER" : b.status === "NOT_SELECTED" ? "NOT SELECTED" : b.status.replace(/_/g, " "),
+      isWinner: b.evaluationSummary?.isWinner ?? false,
+    }))
+    .sort((a, b) => {
+      if (a.rank !== null && b.rank !== null) return a.rank - b.rank;
+      if (a.rank !== null) return -1;
+      if (b.rank !== null) return 1;
+      return 0;
+    });
+
+  const evaluationCriteria = (tender.evaluationCriteria as { name: string; weight: number }[]) || [];
+  const committee = tender.committeeAssignments.map((ca) => ({ name: ca.user.fullName }));
+  const totalBidders = allBidsData.length;
+  const clientUrl = process.env.CORS_ORIGIN || "http://localhost:3000";
+
+  let emailsSent = 0;
+
+  try {
+    const { generateTenderResultsPDF } = await import("../utils/pdf");
+    const { sendWinnerEmail, sendNonSelectedEmail } = await import("../utils/email");
+
+    const pdfBuffer = await generateTenderResultsPDF({
+      tenderTitle: tender.title,
+      category: tender.category,
+      technicalWeight: tender.technicalWeight,
+      financialWeight: tender.financialWeight,
+      minimumTechnicalScore: tender.minimumTechnicalScore,
+      evaluationCriteria,
+      committee,
+      bids: allBidsData,
+    });
+
+    const emailPromises: Promise<void>[] = [];
+
+    // Winner email
+    if (winnerBid) {
+      const winnerName = winnerBid.bidOwner.bidderProfile?.organizationName || winnerBid.bidOwner.fullName;
+      const winnerSummary = winnerBid.evaluationSummary;
+      emailPromises.push(
+        sendWinnerEmail({
+          toEmail: winnerBid.bidOwner.email,
+          bidderName: winnerName,
+          tenderTitle: tender.title,
+          rank: winnerSummary?.rank ?? 1,
+          combinedScore: winnerSummary?.combinedScore ?? 0,
+          bidAmount: winnerBid.bidAmount,
+          totalBidders,
+          allBids: allBidsData,
+          pdfBuffer,
+          resultsUrl: `${clientUrl}/bidder/tenders/${tenderId}`,
+        })
+      );
+    }
+
+    // Non-selected bidder emails
+    for (const bid of loserBids) {
+      const bidderName = bid.bidOwner.bidderProfile?.organizationName || bid.bidOwner.fullName;
+      const summary = bid.evaluationSummary;
+      emailPromises.push(
+        sendNonSelectedEmail({
+          toEmail: bid.bidOwner.email,
+          bidderName,
+          tenderTitle: tender.title,
+          yourRank: summary?.rank ?? null,
+          yourScore: summary?.combinedScore ?? null,
+          totalBidders,
+          allBids: allBidsData,
+          pdfBuffer,
+          resultsUrl: `${clientUrl}/bidder/tenders/${tenderId}`,
+          debriefingUrl: `${clientUrl}/bidder/tenders/${tenderId}`,
+        })
+      );
+    }
+
+    const results = await Promise.allSettled(emailPromises);
+    emailsSent = results.filter((r) => r.status === "fulfilled").length;
+    const failed = results.filter((r) => r.status === "rejected").length;
+
+    if (failed > 0) {
+      console.warn(`⚠️ ${failed} email(s) failed to send for tender ${tenderId}`);
+    }
+    console.log(`📧 ${emailsSent}/${results.length} result emails sent for tender "${tender.title}"`);
+  } catch (err) {
+    console.error("Email sending failed:", err);
+  }
+
+  return { message: "Results published", emailsSent };
 }
 
 export async function getTenderResults(tenderId: number, userId: number, userRole: Role) {

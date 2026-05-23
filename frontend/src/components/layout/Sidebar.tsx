@@ -11,7 +11,6 @@ import {
   Users,
   ScrollText,
   Activity,
-  ClipboardCheck,
   BarChart3,
   MessageSquareText,
   Search,
@@ -45,7 +44,7 @@ const navByRole: Record<Role, NavItem[]> = {
   ],
   [Role.EVALUATOR]: [
     { label: "Dashboard", href: "/evaluator/dashboard", icon: LayoutDashboard },
-    { label: "My Evaluations", href: "/evaluator/evaluations", icon: ClipboardCheck },
+    { label: "Assigned Tenders", href: "/evaluator/tenders", icon: FileText },
     { label: "Notifications", href: "/notifications", icon: Bell },
   ],
   [Role.BIDDER]: [

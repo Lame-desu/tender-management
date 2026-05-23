@@ -9,7 +9,7 @@ RUN npm ci
 
 # Copy prisma schema and generate client
 COPY prisma ./prisma
-RUN npx prisma generate
+RUN npx prisma@6 generate
 
 # Copy source code and compile TypeScript
 COPY tsconfig.json ./
@@ -27,7 +27,7 @@ RUN npm ci --omit=dev
 
 # Copy prisma schema + migrations + seed, then generate client
 COPY prisma ./prisma
-RUN npx prisma generate
+RUN npx prisma@6 generate
 
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
@@ -36,8 +36,10 @@ COPY --from=builder /app/dist ./dist
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
 
-# Need tsx for the seed script at runtime
-RUN npm install tsx
+# Copy tsx from builder for the seed script (avoids extra network call)
+COPY --from=builder /app/node_modules/tsx ./node_modules/tsx
+COPY --from=builder /app/node_modules/esbuild ./node_modules/esbuild
+COPY --from=builder /app/node_modules/@esbuild ./node_modules/@esbuild
 
 # Create uploads directory
 RUN mkdir -p uploads

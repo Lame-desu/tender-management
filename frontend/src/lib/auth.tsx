@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import api from "./api";
 import { User, Role } from "@/types";
@@ -48,6 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   // Check if user is already authenticated on mount
   useEffect(() => {
@@ -66,13 +68,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(
     async (email: string, password: string) => {
+      // Clear all cached data from previous session to prevent stale data leaking between users
+      queryClient.clear();
       const res = await api.post("/auth/login", { email, password });
       const loggedInUser = res.data.data.user;
       setUser(loggedInUser);
       toast.success("Login successful");
       router.push(getRoleDashboard(loggedInUser.role));
     },
-    [router]
+    [router, queryClient]
   );
 
   const register = useCallback(async (data: RegisterData) => {
@@ -85,9 +89,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore errors on logout
     }
+    // Clear all cached data to prevent stale data leaking to next user session
+    queryClient.clear();
     setUser(null);
     router.push("/login");
-  }, [router]);
+  }, [router, queryClient]);
 
   return (
     <AuthContext.Provider value={{ user, isLoading, login, register, logout }}>

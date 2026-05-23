@@ -739,10 +739,18 @@ function AwardSection({ tenderId, financialBids }: { tenderId: number; financial
   });
 
   const publishMut = useMutation({
-    mutationFn: async () => { await api.patch(`/tenders/${tenderId}/publish-results`); },
-    onSuccess: () => {
+    mutationFn: async () => {
+      const res = await api.patch(`/tenders/${tenderId}/publish-results`);
+      return res.data?.data as { emailsSent?: number } | undefined;
+    },
+    onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["tender", tenderId] });
-      toast.success("Results published — all bidders notified");
+      const count = data?.emailsSent ?? 0;
+      toast.success(
+        count > 0
+          ? `Results published — ${count} email${count !== 1 ? "s" : ""} sent to all bidders`
+          : "Results published — all bidders notified"
+      );
       setConfirmPublish(false);
     },
     onError: (e: ApiErr) => { toast.error(e.response?.data?.message || "Failed"); setConfirmPublish(false); },
@@ -811,7 +819,7 @@ function AwardSection({ tenderId, financialBids }: { tenderId: number; financial
             <DialogContent className="max-w-sm">
               <DialogHeader>
                 <DialogTitle>Publish Results</DialogTitle>
-                <DialogDescription>This will notify all bidders of the evaluation results. The winner will be congratulated, and other bidders will be informed they can request a debriefing.</DialogDescription>
+                <DialogDescription>This will notify all bidders of the evaluation results via email with a detailed PDF report attached. The winner will receive a congratulations email, and other bidders will be informed of their ranking and can request a debriefing.</DialogDescription>
               </DialogHeader>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setConfirmPublish(false)}>Cancel</Button>
