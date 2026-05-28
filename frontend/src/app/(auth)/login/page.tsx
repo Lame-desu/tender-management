@@ -343,11 +343,6 @@ export default function LoginPage() {
                         </button>
                       );
                     })}
-                    <div className="border-t border-gray-100 mt-1 pt-1 px-4 py-2">
-                      <p className="text-xs text-gray-400 text-center">
-                        Admin? Leave unselected and sign in directly
-                      </p>
-                    </div>
                   </div>
                 )}
               </div>
