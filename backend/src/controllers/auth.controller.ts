@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { BidderType } from "@prisma/client";
+import { BidderType, Role } from "@prisma/client";
 import * as authService from "../services/auth.service";
 import prisma from "../config/db";
 import {
@@ -45,6 +45,7 @@ const registerSchema = z
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(1, "Password is required"),
+  role: z.nativeEnum(Role).optional(),
 });
 
 // ─── CONTROLLERS ──────────────────────────────────────────────────────────────
@@ -86,7 +87,7 @@ export async function login(req: Request, res: Response, next: NextFunction) {
       throw new ApiError(400, firstError);
     }
 
-    const user = await authService.loginUser(parsed.data.email, parsed.data.password);
+    const user = await authService.loginUser(parsed.data.email, parsed.data.password, parsed.data.role);
 
     const payload: JwtPayload = { id: user.id, email: user.email, role: user.role };
     const accessToken = generateAccessToken(payload);

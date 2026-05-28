@@ -13,6 +13,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
@@ -21,12 +28,19 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>;
 
+const ROLE_OPTIONS = [
+  { value: "BIDDER", label: "Bidder" },
+  { value: "PROCUREMENT_OFFICER", label: "Procurement Manager" },
+  { value: "EVALUATOR", label: "Evaluator" },
+] as const;
+
 export default function LoginPage() {
   const { login } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loginError, setLoginError] = useState("");
   const [resendEmail, setResendEmail] = useState("");
   const [isResending, setIsResending] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<string>("");
 
   const {
     register,
@@ -40,7 +54,8 @@ export default function LoginPage() {
     setIsSubmitting(true);
     setLoginError("");
     try {
-      await login(data.email, data.password);
+      // Pass selectedRole if one was chosen, otherwise undefined (admin case)
+      await login(data.email, data.password, selectedRole || undefined);
     } catch (err: unknown) {
       const error = err as { response?: { data?: { message?: string } } };
       const message = error.response?.data?.message || "Login failed";
@@ -79,6 +94,24 @@ export default function LoginPage() {
       </CardHeader>
       <form onSubmit={handleSubmit(onSubmit)}>
         <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="role">Role</Label>
+            <Select value={selectedRole} onValueChange={setSelectedRole}>
+              <SelectTrigger id="role">
+                <SelectValue placeholder="Select your role" />
+              </SelectTrigger>
+              <SelectContent>
+                {ROLE_OPTIONS.map((role) => (
+                  <SelectItem key={role.value} value={role.value}>
+                    {role.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Admin users can leave this unselected
+            </p>
+          </div>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input

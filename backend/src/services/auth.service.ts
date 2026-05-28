@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
-import { BidderType } from "@prisma/client";
+import { BidderType, Role } from "@prisma/client";
 import prisma from "../config/db";
 import { ApiError } from "../utils/ApiError";
 import { sendPasswordResetEmail, sendEmailVerificationEmail } from "../utils/email";
@@ -70,7 +70,7 @@ export async function registerBidder(input: RegisterInput) {
   return user;
 }
 
-export async function loginUser(email: string, password: string) {
+export async function loginUser(email: string, password: string, selectedRole?: Role) {
   const user = await prisma.user.findUnique({
     where: { email },
     include: {
@@ -86,6 +86,25 @@ export async function loginUser(email: string, password: string) {
   const isMatch = await bcrypt.compare(password, user.password);
   if (!isMatch) {
     throw new ApiError(401, "Invalid email or password");
+  }
+
+  // ── Role verification ──────────────────────────────────────────────────
+  // Admin users: can log in without selecting a role (selectedRole is undefined).
+  //              If they explicitly select a non-ADMIN role, deny login.
+  // Non-admin users: must select a role, and it must match their actual role.
+  if (user.role === Role.ADMIN) {
+    // Admin logging in: if they selected a role, it must be ADMIN
+    if (selectedRole && selectedRole !== Role.ADMIN) {
+      throw new ApiError(403, "Invalid role selected for this account");
+    }
+  } else {
+    // Non-admin users must select a role
+    if (!selectedRole) {
+      throw new ApiError(403, "Please select your role to log in");
+    }
+    if (selectedRole !== user.role) {
+      throw new ApiError(403, "The selected role does not match your account. Please select the correct role.");
+    }
   }
 
   if (user.status === "PENDING") {

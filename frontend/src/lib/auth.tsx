@@ -10,7 +10,7 @@ import { User, Role } from "@/types";
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, role?: string) => Promise<void>;
   register: (data: RegisterData) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -67,10 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string, role?: string) => {
       // Clear all cached data from previous session to prevent stale data leaking between users
       queryClient.clear();
-      const res = await api.post("/auth/login", { email, password });
+      const res = await api.post("/auth/login", { email, password, role: role || undefined });
       const loggedInUser = res.data.data.user;
       setUser(loggedInUser);
       toast.success("Login successful");
